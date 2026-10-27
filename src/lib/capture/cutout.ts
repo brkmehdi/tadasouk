@@ -83,9 +83,48 @@ function pickTapMask<M extends { bounds: Rect; confidence?: number }>(masks: rea
   return close.sort((x, y) => area(x) - area(y))[0] ?? null;
 }
 
+// A tap: ask muse-spark which whole product is under the finger and get its box, so SAM
+// cuts out the bottle and not just its label. Null when it cannot tell.
+async function locateTap(sessionId: string, k: Keyframe): Promise<Box | null> {
+  const W = k.canvas.width;
+  const H = k.canvas.height;
+  const scale = Math.min(1, 768 / Math.max(W, H));
+  const small = document.createElement("canvas");
+  small.width = Math.round(W * scale);
+  small.height = Math.round(H * scale);
+  small.getContext("2d")!.drawImage(k.canvas, 0, 0, small.width, small.height);
+  try {
+    const res = await fetch("/api/locate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        image: small.toDataURL("image/jpeg", 0.8),
+        point: { x: (k.point!.x / W) * 1000, y: (k.point!.y / H) * 1000 },
+      }),
+    });
+    if (!res.ok) return null;
+    const { result: r } = (await res.json()) as { result: { x_min: number; y_min: number; x_max: number; y_max: number } };
+    // The box must contain the tap, with a little margin so SAM sees the edges.
+    const px = (k.point!.x / W) * 1000;
+    const py = (k.point!.y / H) * 1000;
+    if (px < r.x_min - 30 || px > r.x_max + 30 || py < r.y_min - 30 || py > r.y_max + 30) return null;
+    const padX = (r.x_max - r.x_min) * 0.03;
+    const padY = (r.y_max - r.y_min) * 0.03;
+    const x = Math.max(0, ((r.x_min - padX) / 1000) * W);
+    const y = Math.max(0, ((r.y_min - padY) / 1000) * H);
+    return { x, y, w: Math.min(W, ((r.x_max + padX) / 1000) * W) - x, h: Math.min(H, ((r.y_max + padY) / 1000) * H) - y };
+  } catch {
+    return null;
+  }
+}
+
 export async function segment(sessionId: string, k: Keyframe): Promise<Cutout | null> {
   const started = performance.now();
-  const candidates = k.point ? tapCandidates(k) : undefined;
+  const located = k.point ? await locateTap(sessionId, k) : null;
+  // Located: one box around the whole product. Not located: several guesses around the tap.
+  const box = located ?? k.box;
+  const candidates = k.point && !located ? tapCandidates(k) : undefined;
   const res = await fetch("/api/segment", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -94,7 +133,7 @@ export async function segment(sessionId: string, k: Keyframe): Promise<Cutout | 
       image: k.canvas.toDataURL("image/jpeg", 0.85),
       width: k.canvas.width,
       height: k.canvas.height,
-      box: { left: k.box.x, top: k.box.y, right: k.box.x + k.box.w, bottom: k.box.y + k.box.h },
+      box: { left: box.x, top: box.y, right: box.x + box.w, bottom: box.y + box.h },
       point: k.point,
       candidates,
     }),

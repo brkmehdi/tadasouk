@@ -1,22 +1,209 @@
 @import "tailwindcss";
 
+/* Design tokens, after the SmallStore mockup store (Stripe-checkout look): white surfaces,
+   near-black ink, hairline borders with a soft shadow, one blue for the main action. */
 :root {
   --background: #0a0a0a;
   --foreground: #f5f5f5;
+  --ink: rgba(26, 26, 26, 0.9);
+  --ink-2: rgba(26, 26, 26, 0.7);
+  --ink-3: rgba(26, 26, 26, 0.6);
+  --soft: rgba(26, 26, 26, 0.05);
+  --line: rgb(224, 224, 224);
+  --brand: rgb(0, 116, 212);
+  --brand-shine: rgb(58, 139, 238);
+  --danger: rgb(220, 39, 39);
+  --navy: rgb(10, 37, 64);
+  --ok: rgb(36, 180, 126);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-soft: var(--soft);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-danger: var(--danger);
+  --color-navy: var(--navy);
+  --color-ok: var(--ok);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Ubuntu, "Noto Sans Arabic", sans-serif;
   --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, "Noto Sans Arabic", sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
+}
+
+/* ---- building blocks (components layer, so Tailwind utilities can override them) ---- */
+@layer components {
+.ui-input {
+  width: 100%;
+  height: 44px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 16px;
+  outline: none;
+  box-shadow: 0 0 0 1px var(--line), 0 2px 4px rgba(0, 0, 0, 0.07), 0 1px 1.5px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.08s ease-in;
+}
+.ui-input::placeholder {
+  color: var(--ink-3);
+}
+.ui-input:focus {
+  box-shadow: 0 0 0 1px rgb(50, 151, 211), 0 1px 1px rgba(0, 0, 0, 0.07), 0 0 0 3px rgba(50, 151, 211, 0.9);
+}
+.ui-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.1s ease-in, transform 0.08s ease-in, box-shadow 0.08s ease-in;
+}
+.ui-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.ui-btn:disabled {
+  opacity: 0.5;
+}
+.ui-btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(50, 50, 93, 0.1), 0 2px 5px rgba(50, 50, 93, 0.1), 0 1px 1px rgba(0, 0, 0, 0.07);
+}
+/* the light that runs across the main button */
+.ui-btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 150%;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent 0%, var(--brand-shine) 50%, transparent 100%);
+  opacity: 0.55;
+  transform: translateX(-150%);
+  animation: btn-shine 3s ease infinite;
+}
+@keyframes btn-shine {
+  to {
+    transform: translateX(150%);
+  }
+}
+.ui-btn-soft {
+  background: var(--soft);
+  color: var(--ink);
+}
+.ui-btn-soft:hover:not(:disabled) {
+  background: rgba(26, 26, 26, 0.1);
+}
+.ui-btn-secondary {
+  background: #fff;
+  color: var(--ink-2);
+  box-shadow: 0 0 0 1px var(--line), 0 2px 4px rgba(0, 0, 0, 0.07), 0 1px 1.5px rgba(0, 0, 0, 0.05);
+}
+.ui-btn-secondary:hover:not(:disabled) {
+  background: var(--soft);
+}
+.ui-card {
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line), 0 2px 4px rgba(0, 0, 0, 0.07), 0 1px 1.5px rgba(0, 0, 0, 0.05);
+}
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ui-skel {
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.075);
+}
+
+/* Sheets slide up on phones; dialogs pop in with a little spring. */
+.ui-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.2);
+  animation: fade-in 0.25s both;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.ui-sheet-up {
+  animation: sheet-up 0.3s cubic-bezier(0.18, 1.25, 0.4, 1) both;
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+}
+
+/* Echoes around the record button while the merchant talks. */
+.echo {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  animation: echo 1.4s ease-out infinite;
+  pointer-events: none;
+}
+.echo:nth-child(2) {
+  animation-delay: 0.45s;
+}
+.echo:nth-child(3) {
+  animation-delay: 0.9s;
+}
+@keyframes echo {
+  from {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(2.3);
+    opacity: 0;
+  }
+}
+
+/* "+" waiting for the next product: a slow pulse. */
+.armed-pulse {
+  animation: armed-pulse 1.6s ease-in-out infinite;
+}
+@keyframes armed-pulse {
+  50% {
+    box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.18);
+  }
 }
 
 /* Product card flies from the middle of the video into the tray. */
@@ -138,7 +325,11 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .shutter-flash,
-  .card-pop {
+  .card-pop,
+  .echo,
+  .armed-pulse,
+  .ui-btn-primary::after,
+  .ui-sheet-up {
     animation: none;
   }
 }

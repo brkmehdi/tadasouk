@@ -57,6 +57,20 @@ Phase 0, live capture spike.
   the most confident mask kept and nested masks merged back, so tapping a label still cuts out
   the whole product.
 - Caps raised to $1.50 per session and $10 per day for the background research.
+- Capture flow from phone testing: auto-capture takes one product, then waits; a small "+"
+  (or saying "produit suivant") arms the next one, so nothing else gets grabbed while the
+  merchant talks. "hada" only captures when a new product is expected.
+- Research starts as soon as a product is cut out. The AI results are proposals: the product
+  sheet has "Tout utiliser" and an "Utiliser" under each field; voice "utilise tout" works too.
+  The price research now also returns the exact product name (FR/AR), description and category.
+- Tap capture: `/api/locate` (muse-spark-1.3 image grounding) finds the whole product under the
+  finger, so SAM cuts out the bottle and not just its label.
+- Delete asks for confirmation. Small record button with echo rings while talking. One centered
+  caption, two lines at most, fading out. Latency pill only with `?debug`.
+- Design follows the SmallStore mockup store (Stripe-checkout look): white sheets, hairline
+  fields, one blue main button; the frosted product cards stay.
+- Studio photo fidelity check allows small shifts and pastes the real product where the model
+  drew it.
 - Live preview on Cloudflare Workers. Cache Components turned off: it hangs in the Workers runtime.
 - Latency panel on the record screen: first highlight, detector time per frame, capture to card,
   spoken command to UI update.

@@ -100,11 +100,14 @@ export async function studioPhoto(sessionId: string, cutoutUrl: string): Promise
   c.height = side;
   const ctx = c.getContext("2d", { willReadFrequently: true })!;
   ctx.drawImage(gen, 0, 0, side, side);
-  const fidelity = agreement(ctx.getImageData(0, 0, side, side).data, tctx.getImageData(0, 0, side, side).data);
-  ctx.drawImage(transparent, 0, 0);
+  // The model may nudge the product a few pixels; find where it put it, and paste the real
+  // product there so it sits on its painted shadow.
+  const { fidelity, dx, dy } = bestAlignment(ctx.getImageData(0, 0, side, side).data, tctx.getImageData(0, 0, side, side).data, side);
+  ctx.drawImage(transparent, dx, dy);
   const blob = await new Promise<Blob>((resolve, reject) =>
     c.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/jpeg", 0.9),
   );
+  console.info("studio photo fidelity", fidelity.toFixed(2), "offset", dx, dy);
   if (fidelity < 0.8) throw new Error(`Photo studio refusée (fidélité ${fidelity.toFixed(2)})`);
   return { url: URL.createObjectURL(blob), fidelity };
 }
@@ -119,17 +122,33 @@ function drawPlaced(ctx: CanvasRenderingContext2D, cut: HTMLImageElement, side: 
 
 // Share of product pixels (opaque in the cutout) whose color the generated image kept,
 // sampled on a grid: 1 = the product is where it was and looks the same.
-function agreement(generated: Uint8ClampedArray, cutout: Uint8ClampedArray) {
+function agreement(generated: Uint8ClampedArray, cutout: Uint8ClampedArray, side: number, dx: number, dy: number) {
   let n = 0;
   let ok = 0;
   for (let i = 0; i < cutout.length; i += 4 * 7) {
     if (cutout[i + 3] < 250) continue;
+    const p = i / 4;
+    const x = (p % side) + dx;
+    const y = Math.floor(p / side) + dy;
+    if (x < 0 || y < 0 || x >= side || y >= side) continue;
+    const j = (y * side + x) * 4;
     n++;
-    const d =
-      Math.abs(generated[i] - cutout[i]) + Math.abs(generated[i + 1] - cutout[i + 1]) + Math.abs(generated[i + 2] - cutout[i + 2]);
+    const d = Math.abs(generated[j] - cutout[i]) + Math.abs(generated[j + 1] - cutout[i + 1]) + Math.abs(generated[j + 2] - cutout[i + 2]);
     if (d < 90) ok++;
   }
   return n ? ok / n : 0;
+}
+
+// Best agreement over small shifts (up to 24 px each way, in 4 px steps).
+function bestAlignment(generated: Uint8ClampedArray, cutout: Uint8ClampedArray, side: number) {
+  let best = { fidelity: -1, dx: 0, dy: 0 };
+  for (let dy = -24; dy <= 24; dy += 4) {
+    for (let dx = -24; dx <= 24; dx += 4) {
+      const fidelity = agreement(generated, cutout, side, dx, dy);
+      if (fidelity > best.fidelity) best = { fidelity, dx, dy };
+    }
+  }
+  return best;
 }
 
 export async function checkPrice(sessionId: string, p: Product): Promise<PriceCheck> {

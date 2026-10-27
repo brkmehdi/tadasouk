@@ -2,9 +2,18 @@
 
 // Tap a card: it grows into this sheet over the lower part of the video. Recording keeps
 // running, and voice commands apply to the open product. Close: it shrinks back to its card.
+// The AI's proposals (name, description, price) wait under each field; "Tout utiliser"
+// takes them all at once.
 
 import { useLayoutEffect, useRef, useState } from "react";
-import { displayName, type PriceCheck, type Product } from "@/lib/capture/session";
+import {
+  cover,
+  displayName,
+  hasSuggestions,
+  pendingSuggestions,
+  type PriceCheck,
+  type Product,
+} from "@/lib/capture/session";
 import { formatPrice } from "./ProductCard";
 
 type Props = {
@@ -13,11 +22,13 @@ type Props = {
   attaching: boolean;
   onClose: () => void;
   onEdit: (patch: Partial<Product>) => void;
+  onUseAll: () => void;
   onRemoveImage: (imageId: string) => void;
   onCover: (imageId: string) => void;
   onAttach: () => void;
   onBetterPhotos: () => void;
   onCheckPrice: () => void;
+  onRemove: () => void;
 };
 
 const DURATION = 320;
@@ -30,11 +41,14 @@ function flipFrom(el: HTMLElement, from: DOMRect) {
 export default function ProductSheet(props: Props) {
   const { p, from, attaching, onClose, onEdit } = props;
   const sheetRef = useRef<HTMLDivElement>(null);
+  const pending = pendingSuggestions(p);
+  const researching = p.research === "running" || p.identify === "loading";
+  const img = cover(p);
 
   useLayoutEffect(() => {
     const el = sheetRef.current;
     if (!el) return;
-    el.animate([{ transform: flipFrom(el, from), opacity: 0.4, borderRadius: "16px" }, { transform: "none", opacity: 1 }], {
+    el.animate([{ transform: flipFrom(el, from), opacity: 0.4 }, { transform: "none", opacity: 1 }], {
       duration: DURATION,
       easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
     });
@@ -61,195 +75,250 @@ export default function ProductSheet(props: Props) {
   return (
     <div
       ref={sheetRef}
-      className="absolute inset-x-2 bottom-2 z-20 flex max-h-[68dvh] origin-top-left flex-col overflow-hidden rounded-3xl bg-neutral-900/95 shadow-2xl ring-1 ring-white/10 backdrop-blur-xl"
+      className="absolute inset-x-0 bottom-0 z-20 mx-auto flex max-h-[80dvh] max-w-lg origin-top-left flex-col overflow-hidden rounded-t-2xl bg-white text-ink shadow-[0_-12px_40px_rgba(0,0,0,0.25)] sm:bottom-3 sm:rounded-2xl"
       role="dialog"
       aria-label={displayName(p)}
     >
-      <div className="flex items-start gap-2 px-4 pt-3">
+      {/* header */}
+      <div className="flex items-center gap-3 border-b border-black/10 px-4 py-3">
+        {img && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={img.url} alt="" className="h-10 w-10 shrink-0 rounded object-contain ring-1 ring-black/10" />
+        )}
         <div className="min-w-0 flex-1">
-        <input
-          key={`name-${p.id}-${p.name}`}
-          dir="auto"
-          defaultValue={p.name ?? ""}
-          placeholder={displayName(p)}
-          onBlur={(e) => e.target.value.trim() !== (p.name ?? "") && onEdit({ name: e.target.value.trim() || null })}
-          className="w-full bg-transparent text-lg font-semibold outline-none placeholder:text-neutral-500"
-          aria-label="Nom du produit"
-        />
-          {(p.nameAr || p.category) && (
-            <p className="truncate text-xs text-neutral-400">
-              {p.category}
-              {p.category && p.nameAr ? " · " : ""}
-              {p.nameAr && <span dir="rtl">{p.nameAr}</span>}
-            </p>
-          )}
+          <p dir="auto" className="truncate text-base font-medium">
+            {displayName(p)}
+          </p>
+          <p className="truncate text-xs text-ink-3">
+            {researching ? "Recherche en cours…" : [p.category, p.nameAr].filter(Boolean).join(" · ") || " "}
+          </p>
         </div>
         <button
           type="button"
           onClick={close}
           aria-label="Fermer"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-lg active:scale-90"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-soft active:scale-90"
         >
-          ✕
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+            <path d="M2 2l8 8m0-8l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
         </button>
       </div>
 
-      <div className="overflow-y-auto px-4 pb-4">
+      <div className="overflow-y-auto px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        {/* proposals */}
+        {(hasSuggestions(p) || researching) && (
+          <div className="ui-card mb-4 flex items-center gap-3 p-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">{hasSuggestions(p) ? "Propositions prêtes" : "Recherche du produit…"}</p>
+              <p className="text-[13px] leading-snug text-ink-3">
+                {hasSuggestions(p)
+                  ? [pending.name && "nom", pending.price != null && "prix", pending.description && "description"]
+                      .filter(Boolean)
+                      .join(", ")
+                      .replace(/^./, (c) => c.toUpperCase()) + " trouvés pour ce produit."
+                  : "Nom, photos et prix au Maroc."}
+              </p>
+            </div>
+            {hasSuggestions(p) ? (
+              <button type="button" onClick={props.onUseAll} className="ui-btn ui-btn-primary h-9 shrink-0">
+                Tout utiliser
+              </button>
+            ) : (
+              <span className="ui-skel h-9 w-24 shrink-0 animate-pulse" />
+            )}
+          </div>
+        )}
+
         {/* photos */}
-        <div className="-mx-4 mt-3 flex snap-x gap-2 overflow-x-auto px-4 pb-1">
-          {p.images.map((img, i) => (
-            <div key={img.id} className="relative w-32 shrink-0 snap-start">
+        <div className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1">
+          {p.images.map((im, i) => (
+            <div key={im.id} className="relative w-[84px] shrink-0 snap-start">
               <button
                 type="button"
-                onClick={() => props.onCover(img.id)}
+                onClick={() => props.onCover(im.id)}
                 aria-label={i === 0 ? "Photo principale" : "Mettre en photo principale"}
-                className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl bg-white ${
-                  i === 0 ? "ring-2 ring-amber-300" : ""
+                className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md bg-white ${
+                  i === 0 ? "ring-2 ring-ink" : "ring-1 ring-black/10"
                 }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={img.url} alt="" className={`max-h-full max-w-full object-contain ${img.pending ? "opacity-60" : ""}`} />
-                {img.pending && <span className="shimmer absolute inset-0 rounded-2xl" />}
+                <img src={im.url} alt="" className={`h-full w-full object-contain ${im.pending ? "opacity-60" : ""}`} />
+                {im.pending && <span className="shimmer absolute inset-0" />}
               </button>
-              {img.source !== "camera" && (
-                <span className="absolute start-1.5 bottom-1.5 rounded-full bg-black/70 px-1.5 text-[10px]">
-                  {img.source === "studio" ? "Studio" : "IA web"}
-                </span>
+              {im.source !== "camera" && (
+                <span className="ui-badge absolute start-1 bottom-1">{im.source === "studio" ? "Studio" : "Web"}</span>
               )}
               <button
                 type="button"
-                onClick={() => props.onRemoveImage(img.id)}
+                onClick={() => props.onRemoveImage(im.id)}
                 aria-label="Retirer cette photo"
-                className="absolute end-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-xs"
+                className="absolute end-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white/90 text-ink-2 shadow ring-1 ring-black/10"
               >
-                ✕
+                <svg width="8" height="8" viewBox="0 0 10 10" aria-hidden>
+                  <path d="M1.5 1.5l7 7m0-7l-7 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
               </button>
             </div>
           ))}
-          {p.photos === "loading" &&
-            [0, 1].map((i) => <div key={i} className="shimmer aspect-square w-32 shrink-0 rounded-2xl" />)}
+          {p.photos === "loading" && [0, 1].map((i) => <div key={i} className="ui-skel aspect-square w-[84px] shrink-0 animate-pulse" />)}
           <button
             type="button"
             onClick={props.onAttach}
-            className={`flex aspect-square w-24 shrink-0 flex-col items-center justify-center gap-1 rounded-2xl border border-dashed text-xs ${
-              attaching ? "border-sky-400 bg-sky-400/15 text-sky-200" : "border-white/25 text-neutral-300"
+            className={`flex aspect-square w-[84px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md text-xs font-medium ${
+              attaching ? "bg-brand text-white" : "bg-soft text-ink-2"
             }`}
           >
-            <span className="text-2xl leading-none">+</span>
+            <span className="text-xl leading-none">+</span>
             {attaching ? "Filmez-le" : "Photo"}
           </button>
         </div>
 
+        {/* name */}
+        <div className="mt-4">
+          <label className="ui-label" htmlFor="sheet-name">
+            Nom
+          </label>
+          <input
+            id="sheet-name"
+            key={`name-${p.id}-${p.name}`}
+            dir="auto"
+            defaultValue={p.name ?? ""}
+            placeholder="Nom du produit"
+            onBlur={(e) => e.target.value.trim() !== (p.name ?? "") && onEdit({ name: e.target.value.trim() || null })}
+            className="ui-input"
+          />
+          {pending.name && <Proposal text={pending.name} onUse={() => onEdit({ name: pending.name })} />}
+        </div>
+
         {/* price and stock */}
-        <div className="mt-3 flex items-end gap-3">
-          <label className="flex-1">
-            <span className="text-xs text-neutral-400">Prix ({p.currency === "EUR" ? "€" : "DH"})</span>
+        <div className="mt-4 flex gap-3">
+          <div className="min-w-0 flex-1">
+            <label className="ui-label" htmlFor="sheet-price">
+              Prix ({p.currency === "EUR" ? "€" : "DH"})
+            </label>
             <input
+              id="sheet-price"
               key={`price-${p.id}-${p.price}`}
               inputMode="decimal"
               defaultValue={p.price ?? ""}
-              placeholder="—"
+              placeholder="0"
               onBlur={(e) => commitNumber(e.target.value, "price")}
-              className="mt-0.5 w-full rounded-xl bg-white/10 px-3 py-2 font-mono text-lg outline-none focus:ring-2 focus:ring-amber-300"
+              className="ui-input tabular-nums"
             />
-          </label>
-          {p.compareAtPrice != null && (
-            <span className="pb-2.5 text-sm text-neutral-400 line-through">{formatPrice(p.compareAtPrice, p.currency)}</span>
-          )}
-          <label className="w-20">
-            <span className="text-xs text-neutral-400">Stock</span>
+          </div>
+          <div className="w-24">
+            <label className="ui-label" htmlFor="sheet-qty">
+              Stock
+            </label>
             <input
+              id="sheet-qty"
               key={`qty-${p.id}-${p.quantity}`}
               inputMode="numeric"
               defaultValue={p.quantity ?? ""}
-              placeholder="—"
+              placeholder="0"
               onBlur={(e) => commitNumber(e.target.value, "quantity")}
-              className="mt-0.5 w-full rounded-xl bg-white/10 px-3 py-2 font-mono text-lg outline-none focus:ring-2 focus:ring-amber-300"
+              className="ui-input tabular-nums"
             />
-          </label>
+          </div>
         </div>
+        {p.compareAtPrice != null && (
+          <p className="mt-1.5 text-[13px] text-ink-3">
+            Avant remise : <span className="line-through tabular-nums">{formatPrice(p.compareAtPrice, p.currency)}</span>
+          </p>
+        )}
+        {pending.price != null && (
+          <Proposal
+            text={`Conseillé : ${formatPrice(pending.price, p.currency)}`}
+            onUse={() => onEdit({ price: pending.price, compareAtPrice: null })}
+          />
+        )}
+        {p.priceCheck && <PriceDetails check={p.priceCheck} price={p.price} currency={p.currency} />}
 
         {/* description */}
-        <label className="mt-3 block">
-          <span className="text-xs text-neutral-400">Description</span>
+        <div className="mt-4">
+          <label className="ui-label" htmlFor="sheet-desc">
+            Description
+          </label>
           <textarea
+            id="sheet-desc"
             key={`desc-${p.id}-${p.description}`}
             dir="auto"
             rows={3}
             defaultValue={p.description ?? ""}
-            placeholder="Écrivez, ou dites : « la description : … »"
+            placeholder="Écrivez, ou dites « la description : … »"
             onBlur={(e) =>
               e.target.value.trim() !== (p.description ?? "") && onEdit({ description: e.target.value.trim() || null })
             }
-            className="mt-0.5 w-full resize-none rounded-xl bg-white/10 px-3 py-2 text-[15px] leading-snug outline-none placeholder:text-neutral-500 focus:ring-2 focus:ring-amber-300"
+            className="ui-input h-auto resize-none py-2.5 leading-snug"
           />
-        </label>
+          {pending.description && <Proposal text={pending.description} onUse={() => onEdit({ description: pending.description })} />}
+        </div>
 
         {/* actions */}
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-5 grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={props.onBetterPhotos}
             disabled={p.photos === "loading" || !p.images.length}
-            className="rounded-2xl bg-white/10 px-3 py-3 text-sm font-medium active:scale-[0.98] disabled:opacity-40"
+            className="ui-btn ui-btn-soft h-11"
           >
-            {p.photos === "loading" ? "Photos en cours…" : "✨ Meilleures photos"}
+            {p.photos === "loading" ? "Photos en cours…" : "Chercher des photos"}
           </button>
           <button
             type="button"
             onClick={props.onCheckPrice}
             disabled={p.priceCheck?.status === "loading"}
-            className="rounded-2xl bg-white/10 px-3 py-3 text-sm font-medium active:scale-[0.98] disabled:opacity-40"
+            className="ui-btn ui-btn-soft h-11"
           >
-            {p.priceCheck?.status === "loading" ? "Recherche…" : "📊 Vérifier le prix"}
+            {p.priceCheck?.status === "loading" ? "Recherche…" : "Vérifier le prix"}
           </button>
         </div>
-        {p.photos === "error" && <p className="mt-2 text-sm text-red-300">Les photos n&apos;ont pas pu être créées.</p>}
+        {p.photos === "error" && <p className="mt-2 text-[13px] text-danger">Les photos n’ont pas pu être créées.</p>}
 
-        {p.priceCheck && (
-          <PriceCheckView
-            check={p.priceCheck}
-            price={p.price}
-            currency={p.currency}
-            onUse={(v) => onEdit({ price: v, compareAtPrice: null })}
-          />
-        )}
+        <div className="mt-4 flex justify-center">
+          <button type="button" onClick={props.onRemove} className="ui-btn h-9 text-[13px] text-danger hover:bg-soft">
+            Supprimer ce produit
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
+// A value the AI proposes for a field, with a one-tap "Utiliser".
+function Proposal({ text, onUse }: { text: string; onUse: () => void }) {
+  return (
+    <div className="mt-1.5 flex items-start gap-2 text-[13px] leading-snug">
+      <span dir="auto" className="line-clamp-2 min-w-0 flex-1 text-ink-3">
+        {text}
+      </span>
+      <button type="button" onClick={onUse} className="shrink-0 font-medium text-brand">
+        Utiliser
+      </button>
+    </div>
+  );
+}
+
 const VERDICT: Record<string, { text: string; className: string }> = {
-  cheap: { text: "Moins cher que le marché", className: "bg-emerald-400 text-black" },
-  fair: { text: "Prix dans le marché", className: "bg-sky-400 text-black" },
-  expensive: { text: "Plus cher que le marché", className: "bg-rose-400 text-black" },
-  unknown: { text: "Pas assez de prix trouvés", className: "bg-white/20" },
+  cheap: { text: "Moins cher que le marché", className: "text-ok" },
+  fair: { text: "Dans le prix du marché", className: "text-ink-2" },
+  expensive: { text: "Plus cher que le marché", className: "text-danger" },
+  unknown: { text: "", className: "" },
 };
 
-// Suggested price first; the range, note and sources open on demand.
-function PriceCheckView({
-  check,
-  price,
-  currency,
-  onUse,
-}: {
-  check: PriceCheck;
-  price: number | null;
-  currency: string;
-  onUse: (v: number) => void;
-}) {
-  const [details, setDetails] = useState(false);
+// The market range in one line; the four prices, note and sources open on demand.
+function PriceDetails({ check, price, currency }: { check: PriceCheck; price: number | null; currency: string }) {
+  const [open, setOpen] = useState(false);
   if (check.status === "loading") {
     return (
-      <div className="mt-3 rounded-2xl bg-white/5 p-3">
-        <p className="text-sm text-neutral-300">Recherche des prix au Maroc…</p>
-        <div className="shimmer mt-2 h-3 rounded-full" />
+      <div className="mt-3 flex items-center gap-2 text-[13px] text-ink-3">
+        <span className="ui-skel h-3 w-40 animate-pulse" /> Prix au Maroc…
       </div>
     );
   }
-  if (check.status === "error") {
-    return <p className="mt-3 text-sm text-red-300">{check.message}</p>;
-  }
+  if (check.status === "error") return <p className="mt-3 text-[13px] text-danger">{check.message}</p>;
+
   const { low, average, high, suggested } = check;
   const cur = check.currency || currency;
   const fmt = (v: number | null) => (v == null ? "—" : formatPrice(Math.round(v * 100) / 100, cur));
@@ -257,63 +326,46 @@ function PriceCheckView({
   const min = Math.min(...values);
   const max = Math.max(...values);
   const pos = (v: number) => (max > min ? ((v - min) / (max - min)) * 100 : 50);
-  const verdict = price != null ? (VERDICT[check.verdict] ?? VERDICT.unknown) : null;
+  const verdict = price != null ? VERDICT[check.verdict] : null;
 
   return (
-    <div className="mt-3 rounded-2xl bg-white/5 p-3">
-      <div className="flex items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] text-neutral-400">Prix conseillé au Maroc</p>
-          <p className="font-mono text-xl font-bold">{fmt(suggested)}</p>
-        </div>
-        {suggested != null && suggested !== price && (
-          <button
-            type="button"
-            onClick={() => onUse(suggested)}
-            className="rounded-xl bg-amber-300 px-3 py-2 text-sm font-semibold text-black active:scale-95"
-          >
-            Utiliser
-          </button>
-        )}
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        {verdict && (
-          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${verdict.className}`}>{verdict.text}</span>
-        )}
-        <button
-          type="button"
-          onClick={() => setDetails((d) => !d)}
-          aria-expanded={details}
-          className="ms-auto text-xs text-sky-300 underline-offset-2 hover:underline"
-        >
-          {details ? "Masquer" : "Détails"}
+    <div className="mt-3">
+      <div className="flex items-center gap-2 text-[13px]">
+        <span className="text-ink-3">Marché au Maroc</span>
+        <span className="font-medium tabular-nums">
+          {fmt(low)} – {fmt(high)}
+        </span>
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="ms-auto font-medium text-brand">
+          {open ? "Masquer" : "Détails"}
         </button>
       </div>
+      {verdict?.text && <p className={`mt-0.5 text-[13px] font-medium ${verdict.className}`}>{verdict.text}</p>}
 
-      {details && (
-        <div className="mt-3">
-          <div className="grid grid-cols-3 text-center">
+      {open && (
+        <div className="ui-card mt-2 p-3">
+          <div className="grid grid-cols-4 text-center">
             {(
               [
-                ["Le plus bas", low],
+                ["Plus bas", low],
                 ["Moyenne", average],
-                ["Le plus haut", high],
+                ["Conseillé", suggested],
+                ["Plus haut", high],
               ] as const
             ).map(([k, v]) => (
               <div key={k}>
-                <p className="text-[11px] text-neutral-400">{k}</p>
-                <p className="font-mono text-sm font-semibold">{fmt(v)}</p>
+                <p className="text-[11px] text-ink-3">{k}</p>
+                <p className="text-sm font-semibold tabular-nums">{fmt(v)}</p>
               </div>
             ))}
           </div>
           {values.length > 1 && (
-            <div className="relative mx-1 mt-3 h-2 rounded-full bg-gradient-to-r from-emerald-400 via-sky-400 to-rose-400">
+            <div className="relative mx-1 mt-3 h-1.5 rounded-full bg-black/10">
               {suggested != null && (
-                <span className="absolute top-1/2 h-3.5 w-0.5 -translate-y-1/2 bg-white" style={{ left: `${pos(suggested)}%` }} title="Conseillé" />
+                <span className="absolute top-1/2 h-3 w-0.5 -translate-y-1/2 bg-brand" style={{ left: `${pos(suggested)}%` }} title="Conseillé" />
               )}
               {price != null && (
                 <span
-                  className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black bg-amber-300"
+                  className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-ink shadow"
                   style={{ left: `${pos(price)}%` }}
                   title="Votre prix"
                 />
@@ -321,18 +373,18 @@ function PriceCheckView({
             </div>
           )}
           {check.note && (
-            <p dir="auto" className="mt-3 text-sm leading-snug text-neutral-300">
+            <p dir="auto" className="mt-3 text-[13px] leading-snug text-ink-2">
               {check.note}
             </p>
           )}
           {check.sources.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {check.sources.slice(0, 5).map((src) => (
-                <li key={src.url + src.title} className="flex gap-2 text-xs">
-                  <a href={src.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sky-300 underline">
-                    {src.title}
+            <ul className="mt-2 space-y-1.5 border-t border-black/10 pt-2">
+              {check.sources.slice(0, 5).map((s) => (
+                <li key={s.url + s.title} className="flex gap-2 text-xs">
+                  <a href={s.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-brand">
+                    {s.title}
                   </a>
-                  {src.price != null && <span className="font-mono">{fmt(src.price)}</span>}
+                  {s.price != null && <span className="tabular-nums text-ink-2">{fmt(s.price)}</span>}
                 </li>
               ))}
             </ul>

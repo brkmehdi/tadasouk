@@ -20,6 +20,10 @@ export type PriceCheck =
       average: number | null;
       high: number | null;
       suggested: number | null;
+      name_fr?: string;
+      name_ar?: string;
+      description_fr?: string;
+      category?: string;
       verdict: "cheap" | "fair" | "expensive" | "unknown";
       note: string;
       sources: { title: string; url: string; price: number | null }[];
@@ -28,7 +32,9 @@ export type PriceCheck =
 export type Product = {
   id: string;
   order: number;
-  name: string | null;
+  name: string | null; // set by the merchant (or accepted from the suggestion)
+  // What the AI proposes; shown as a draft until the merchant uses it ("Tout utiliser").
+  suggested: { name: string | null; description: string | null };
   nameAr: string | null;
   category: string | null;
   identify: "idle" | "loading" | "done" | "failed"; // AI naming from the photo
@@ -58,7 +64,7 @@ export type SessionState = {
 export type ToolCall = { name: string; args: Record<string, unknown> };
 
 // Calls the browser runs after applying the state change (they need network and time).
-export type Effect = { kind: "better_photos" | "check_price"; productId: string };
+export type Effect = { kind: "better_photos" | "check_price" | "next_product"; productId: string };
 
 export type Applied = { state: SessionState; question: string | null; changed: boolean; effects: Effect[] };
 
@@ -75,7 +81,32 @@ export function cover(p: Product) {
 }
 
 export function displayName(p: Product) {
-  return p.name ?? (p.label ? p.label[0].toUpperCase() + p.label.slice(1) : "Produit");
+  return p.name ?? p.suggested.name ?? (p.label ? p.label[0].toUpperCase() + p.label.slice(1) : "Produit");
+}
+
+// Suggestions the merchant has not taken yet (empty when everything is already in use).
+export function pendingSuggestions(p: Product) {
+  const price = suggestedPrice(p);
+  return {
+    name: p.suggested.name && p.suggested.name !== p.name ? p.suggested.name : null,
+    description: p.suggested.description && p.suggested.description !== p.description ? p.suggested.description : null,
+    price: price != null && price !== p.price ? price : null,
+  };
+}
+
+export function hasSuggestions(p: Product) {
+  const s = pendingSuggestions(p);
+  return s.name != null || s.description != null || s.price != null;
+}
+
+// "Tout utiliser": take every pending suggestion at once.
+export function suggestionPatch(p: Product): Partial<Product> {
+  const s = pendingSuggestions(p);
+  return {
+    ...(s.name != null ? { name: s.name } : {}),
+    ...(s.description != null ? { description: s.description } : {}),
+    ...(s.price != null ? { price: s.price, compareAtPrice: null } : {}),
+  };
 }
 
 export function suggestedPrice(p: Product) {
@@ -98,7 +129,7 @@ export function nextQuestion(p: Product): Question | null {
         }
       : { productId: p.id, text: `Quel est le prix de « ${name} » ?` };
   }
-  if (!p.name) return { productId: p.id, text: "Comment s’appelle ce produit ?" };
+  if (!p.name && !p.suggested.name) return { productId: p.id, text: "Comment s’appelle ce produit ?" };
   if (p.quantity == null) return { productId: p.id, text: `Combien de « ${name} » avez-vous ?` };
   return null;
 }
@@ -113,6 +144,7 @@ export function agentView(state: SessionState) {
     products: list.map((p) => ({
       id: p.id,
       name: p.name,
+      suggestedName: p.suggested.name,
       label: p.label,
       color: p.color,
       price: p.price,
@@ -139,6 +171,7 @@ function blank(state: SessionState, id: string): Product {
     id,
     order: nextOrder(state),
     name: null,
+    suggested: { name: null, description: null },
     nameAr: null,
     category: null,
     identify: "idle",
@@ -240,6 +273,7 @@ function undo(state: SessionState): SessionState {
       identify: now.identify,
       research: now.research,
       nameAr: now.nameAr,
+      suggested: now.suggested,
       category: now.category,
       status: now.status === "removing" ? "active" : now.status,
     } satisfies Product;
@@ -292,6 +326,10 @@ export function applyCalls(state: SessionState, calls: ToolCall[], newId: () => 
       changed = true;
       continue;
     }
+    if (name === "next_product") {
+      effects.push({ kind: "next_product", productId: s.currentId ?? "" });
+      continue;
+    }
     if (name === "ask_merchant") {
       question = String(args.question ?? "") || "?";
       const p = find(args);
@@ -335,6 +373,9 @@ export function applyCalls(state: SessionState, calls: ToolCall[], newId: () => 
       effects.push({ kind: "better_photos", productId: p.id });
     } else if (name === "check_price") {
       effects.push({ kind: "check_price", productId: p.id });
+    } else if (name === "accept_suggestions") {
+      const patch = suggestionPatch(p);
+      if (Object.keys(patch).length) update(p.id, patch);
     }
   }
 

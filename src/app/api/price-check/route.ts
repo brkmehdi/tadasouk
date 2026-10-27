@@ -1,5 +1,6 @@
-// "Is my price competitive?" muse-spark-1.3 looks at the product photo, searches the web
-// from Morocco, and returns the lowest, average, highest and suggested price, with sources.
+// Product research: muse-spark-1.3 looks at the photo, searches the web from Morocco, and
+// returns what the product exactly is (name, description, category) and its prices there:
+// lowest, average, highest and a suggested price, with sources.
 
 import { NextResponse } from "next/server";
 import { errorResponse, responsesJson, serverEnv } from "@/lib/server/meta";
@@ -21,9 +22,27 @@ const ESTIMATE_USD = 0.15; // worst case held against the caps while the check r
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["product", "currency", "low", "average", "high", "suggested", "verdict", "note", "sources"],
+  required: [
+    "product",
+    "name_fr",
+    "name_ar",
+    "description_fr",
+    "category",
+    "currency",
+    "low",
+    "average",
+    "high",
+    "suggested",
+    "verdict",
+    "note",
+    "sources",
+  ],
   properties: {
     product: { type: "string", description: "What the product is, as identified" },
+    name_fr: { type: "string", description: "Shop title in French: brand, variant and size when known" },
+    name_ar: { type: "string", description: "Same title in Arabic" },
+    description_fr: { type: "string", description: "Two short factual sentences in French for the product page" },
+    category: { type: "string", description: "One shop category in French, e.g. Épicerie, Beauté, Maison" },
     currency: { type: "string" },
     low: { type: ["number", "null"] },
     average: { type: ["number", "null"] },
@@ -59,7 +78,7 @@ export async function POST(req: Request) {
   }
 
   const ask = [
-    name ? `Product name: ${name}.` : "Identify the product from the photo.",
+    name ? `Product name: ${name}.` : "Identify the exact product from the photo (brand, variant, size).",
     label ? `On-device detector label: ${label}.` : "",
     description ? `Merchant description: ${description}.` : "",
     price != null ? `The merchant sells it for ${price} ${currency}.` : "The merchant has not set a price yet.",
@@ -67,6 +86,7 @@ export async function POST(req: Request) {
     `Return the lowest, average and highest price you found in ${currency}, and a suggested selling price that is competitive for a small local shop (round number).`,
     `Add a verdict on the merchant price (unknown if none), a short note, and up to 5 sources with their prices.`,
     `If you cannot find this exact product, use the closest comparable products and say so in the note.`,
+    `Also give its shop title in French and Arabic, a two-sentence French description based on what you found, and a category.`,
     `Write the note in French.`,
   ]
     .filter(Boolean)

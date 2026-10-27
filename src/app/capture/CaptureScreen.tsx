@@ -1,7 +1,7 @@
 "use client";
 
 import type { ObjectDetector } from "@mediapipe/tasks-vision";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ghostCrop, grabKeyframe, segment, SegmentError, type Keyframe } from "@/lib/capture/cutout";
 import { createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
 import { emptyMetrics, report, type Metrics } from "@/lib/capture/metrics";
@@ -23,6 +23,7 @@ import {
   patchProduct,
   purgeRemoved,
   removeProduct,
+  suggestionPatch,
   type Effect,
   type ProductImage,
   type Question,
@@ -33,6 +34,7 @@ import { explainMediaError, openCamera, type MediaHelp } from "@/lib/capture/med
 import { startVoice } from "@/lib/capture/voice";
 import ProductCard from "./ProductCard";
 import ProductSheet from "./ProductSheet";
+import ConfirmRemove from "./ConfirmRemove";
 
 type Phase = "idle" | "starting" | "recording" | "stopped";
 type Caption = { id: number; text: string; kind: "heard" | "pending" | "question" | "error" };
@@ -68,6 +70,9 @@ export default function CaptureScreen() {
   const sigsRef = useRef(new Map<string, { crops: Signature[]; cutouts: Signature[] }>());
   const audioCtxRef = useRef<AudioContext | null>(null);
   const identifyingRef = useRef(new Map<string, Promise<void>>());
+  // Auto-capture takes one product, then waits for "+" (or "produit suivant") so the camera
+  // does not grab whatever passes while the merchant talks about the current product.
+  const armedRef = useRef(true);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [session, setSessionState] = useState<SessionState>(initialSession);
@@ -84,19 +89,37 @@ export default function CaptureScreen() {
   const [shots, setShots] = useState<Shot[]>([]);
   const [shutterN, setShutterN] = useState(0);
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const [armed, setArmedState] = useState(true);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  // The latency panel is for testing only: add ?debug to the address.
+  const debug = useSyncExternalStore(
+    noSubscribe,
+    () => new URLSearchParams(location.search).has("debug"),
+    () => false,
+  );
 
   const setSession = useCallback((next: SessionState) => {
     sessionRef.current = next;
     setSessionState(next);
   }, []);
 
+  // One line of text at a time; it fades out after a few seconds ("pending" waits for its result).
   const caption = useCallback((text: string, kind: Caption["kind"], replaceId?: number) => {
     const id = replaceId ?? ++captionIdRef.current;
     setCaptions((list) => {
       const rest = list.filter((c) => c.id !== id);
       return [...rest, { id, text, kind }].slice(-3);
     });
+    if (kind !== "pending") {
+      const ttl = kind === "error" ? 6000 : kind === "question" ? 9000 : 4000;
+      setTimeout(() => setCaptions((list) => list.filter((c) => c.id !== id)), ttl);
+    }
     return id;
+  }, []);
+
+  const setArmed = useCallback((v: boolean) => {
+    armedRef.current = v;
+    setArmedState(v);
   }, []);
 
   const refreshMetrics = useCallback(() => setMetricsView(report(metricsRef.current)), []);
@@ -111,6 +134,10 @@ export default function CaptureScreen() {
   const runEffect = useCallback(
     (effect: Effect): Promise<void> | void => {
       const sid = sessionIdRef.current || crypto.randomUUID();
+      if (effect.kind === "next_product") {
+        setArmed(true);
+        return;
+      }
       const product = sessionRef.current.products.find((p) => p.id === effect.productId);
       if (!product) return;
       if (effect.kind === "better_photos") {
@@ -128,12 +155,21 @@ export default function CaptureScreen() {
         if (product.priceCheck?.status === "loading") return;
         setSession(patchProduct(sessionRef.current, product.id, { priceCheck: { status: "loading" } }));
         return checkPrice(sid, product).then((check) => {
-          setSession(patchProduct(sessionRef.current, product.id, { priceCheck: check }));
+          const now = sessionRef.current.products.find((p) => p.id === product.id);
+          if (!now) return;
+          const patch: Partial<typeof now> = { priceCheck: check };
+          // The web search knows the exact product better than the photo alone.
+          if (check.status === "done" && check.name_fr) {
+            patch.suggested = { name: check.name_fr, description: check.description_fr || now.suggested.description };
+            if (check.name_ar) patch.nameAr = check.name_ar;
+            if (check.category) patch.category = check.category;
+          }
+          setSession(patchProduct(sessionRef.current, product.id, patch));
           if (check.status === "error") caption(check.message, "error");
         });
       }
     },
-    [caption, setSession],
+    [caption, setArmed, setSession],
   );
 
 
@@ -150,10 +186,9 @@ export default function CaptureScreen() {
           const now = sessionRef.current.products.find((p) => p.id === id);
           if (!now) return;
           const patch: Partial<typeof now> = { identify: who ? "done" : "failed" };
-          if (who) {
-            // The name is a draft the merchant can change; the description only when sure.
-            if (!now.name && who.name_fr) patch.name = who.name_fr;
-            if (!now.description && who.confident) patch.description = who.description_fr;
+          if (who && !now.suggested.name) {
+            // A first guess from the photo; the web research replaces it when it lands.
+            patch.suggested = { name: who.name_fr || null, description: who.confident ? who.description_fr : null };
             patch.nameAr = who.name_ar || null;
             patch.category = who.category || null;
           }
@@ -180,17 +215,17 @@ export default function CaptureScreen() {
     [setSession],
   );
 
-  // Once the merchant moves on (next product, or stop): studio photos of the real pictures,
-  // photos guided by the web, and prices in Morocco, all in the background.
-  const finishProduct = useCallback(
-    async (id: string) => {
+  // As soon as a product is cut out: its studio photo, then (once named) photos guided by
+  // the web and the product research (exact name, description, prices in Morocco).
+  const researchProduct = useCallback(
+    async (id: string, image: ProductImage) => {
       const product = sessionRef.current.products.find((p) => p.id === id);
       if (!product || product.research !== "idle" || product.status !== "active") return;
       setSession(patchProduct(sessionRef.current, id, { research: "running" }));
+      const studio = runStudio(id, image);
       await identifyingRef.current.get(id);
-      const camera = product.images.filter((i) => i.source === "camera" && i.cutoutUrl).slice(0, 2);
       await Promise.allSettled([
-        ...camera.map((img) => runStudio(id, img)),
+        studio,
         runEffect({ kind: "better_photos", productId: id }),
         runEffect({ kind: "check_price", productId: id }),
       ]);
@@ -254,14 +289,13 @@ export default function CaptureScreen() {
       const imageId = crypto.randomUUID();
       const ghostUrl = ghostCrop(k);
       const id = attachTo?.id ?? crypto.randomUUID();
-      const previous = sessionRef.current.currentId;
       sigsOf(id).crops.push(crop);
+      if (!attachTo) setArmed(false); // one product per "+"
       // Shutter: flash, click, and the shot flies from where it was taken into its card.
       shutter(audioCtxRef.current);
       setShutterN((n) => n + 1);
       const from = videoRef.current ? screenRect(videoRef.current, k) : null;
       if (from) setShots((list) => [...list, { id: imageId, url: ghostUrl, from, productId: id }]);
-      if (!attachTo && previous && previous !== id) void finishProduct(previous);
       setSession(
         attachTo
           ? addImage(sessionRef.current, id, { id: imageId, url: ghostUrl, source: "camera", pending: true })
@@ -293,10 +327,13 @@ export default function CaptureScreen() {
           const product = next.products.find((p) => p.id === id);
           if (cut && product && !product.color) next = patchProduct(next, id, { color: cut.color });
           setSession(next);
-          if (cut && !attachTo) runIdentify(id);
-          // A photo added to an already researched product gets its studio version too.
           const img = next.products.find((p) => p.id === id)?.images.find((i) => i.id === imageId);
-          if (cut && attachTo && attachTo.research === "done" && img) void runStudio(id, img);
+          if (cut && !attachTo && img) {
+            runIdentify(id);
+            void researchProduct(id, img);
+          }
+          // A photo added later to a product gets its studio version too.
+          if (cut && attachTo && img) void runStudio(id, img);
           if (cut) metricsRef.current.capture.push({ at: Date.now(), ms, parts: { sam: cut.samMs } });
           refreshMetrics();
         })
@@ -306,7 +343,7 @@ export default function CaptureScreen() {
         });
       return id;
     },
-    [bestMatch, caption, finishProduct, refreshMetrics, runIdentify, runStudio, selectExisting, setSession],
+    [bestMatch, caption, refreshMetrics, researchProduct, runIdentify, runStudio, selectExisting, setArmed, setSession],
   );
 
   const centerBox = (v: HTMLVideoElement): Box => {
@@ -335,11 +372,12 @@ export default function CaptureScreen() {
         m.firstHighlightMs = now - startedAtRef.current;
         refreshMetrics();
       }
-      if (triggerRef.current.update(target, video.videoWidth, video.videoHeight, now) && target) {
+      if (armedRef.current && triggerRef.current.update(target, video.videoWidth, video.videoHeight, now) && target) {
         capture(grabKeyframe(video, target.box), target.label, "auto");
       }
     }
-    draw(canvas, video, targetRef.current, drawBoxRef, triggerRef.current.progress(now));
+    const show = armedRef.current ? targetRef.current : null;
+    draw(canvas, video, show, drawBoxRef, show ? triggerRef.current.progress(now) : 0);
   }, [capture, refreshMetrics]);
 
   // ---------- voice: chunk -> transcript -> (cue capture) -> agent -> UI ----------
@@ -367,7 +405,8 @@ export default function CaptureScreen() {
 
           // "this one" / "hada" captures the frame from when the merchant started talking,
           // unless the held-still trigger already took one during this sentence.
-          if (CUE.test(text) && snap && lastCaptureAtRef.current < info.startedAt - 1500) {
+          // When no new product is expected, "hada" just means the current one.
+          if (armedRef.current && CUE.test(text) && snap && lastCaptureAtRef.current < info.startedAt - 1500) {
             capture(snap, label, "voice");
           }
 
@@ -423,6 +462,8 @@ export default function CaptureScreen() {
     setAttach(null);
     setOpen(null);
     setDismissed([]);
+    setConfirmId(null);
+    setArmed(true);
     sigsRef.current.clear();
     setCaptions([]);
 
@@ -489,7 +530,7 @@ export default function CaptureScreen() {
         })
         .catch(() => setDetectorState("failed"));
     }
-  }, [caption, handleChunk, step, refreshMetrics, setAttach, setSession]);
+  }, [caption, handleChunk, step, refreshMetrics, setArmed, setAttach, setSession]);
 
   const stop = useCallback(async () => {
     cancelAnimationFrame(loopRef.current);
@@ -505,8 +546,7 @@ export default function CaptureScreen() {
     setLevel({ rms: 0, speaking: false });
     setPhase("stopped");
     audioCtxRef.current = null;
-    for (const p of sessionRef.current.products) void finishProduct(p.id);
-  }, [finishProduct]);
+  }, []);
 
   useEffect(
     () => () => {
@@ -543,8 +583,9 @@ export default function CaptureScreen() {
   const products = [...session.products].sort((a, b) => b.order - a.order);
   const openProduct = open ? session.products.find((p) => p.id === open.id && p.status !== "removing") : undefined;
   const attachProduct = attachId ? session.products.find((p) => p.id === attachId) : undefined;
+  const confirmProduct = confirmId ? session.products.find((p) => p.id === confirmId) : undefined;
 
-  const onRemove = (id: string) => {
+  const removeNow = (id: string) => {
     setSession(removeProduct(sessionRef.current, id));
     if (attachIdRef.current === id) setAttach(null);
     if (open?.id === id) setOpen(null);
@@ -552,12 +593,18 @@ export default function CaptureScreen() {
   };
   const onOpen = (id: string, from: DOMRect) => {
     setSession({ ...sessionRef.current, currentId: id }); // voice commands now apply to it
+    setArmed(false); // editing, not filming the next product
     setOpen({ id, from });
   };
   const onAttach = (id: string) => setAttach(attachIdRef.current === id ? null : id);
+  const applySuggestions = (id: string) => {
+    const p = sessionRef.current.products.find((x) => x.id === id);
+    if (p) setSession(editProduct(sessionRef.current, id, suggestionPatch(p)));
+  };
 
-  // One question at a time: about the current product while filming (when the merchant is
-  // quiet), then about each unfinished product once recording stops.
+  // One line of text at a time, centered above the record button. Most recent first:
+  // what was just heard or answered, else the "next product" hint, else one question about
+  // what is missing (asked only while the merchant is quiet).
   const keyOf = (q: Question) => `${q.productId}:${q.text}`;
   const candidates =
     phase === "recording"
@@ -571,13 +618,16 @@ export default function CaptureScreen() {
       : (candidates
           .map((p) => (p ? nextQuestion(p) : null))
           .find((q): q is Question => !!q && !dismissed.includes(keyOf(q))) ?? null);
+  const latest = captions.at(-1) ?? null;
+  const showHint = phase === "recording" && armed && session.products.length > 0 && !latest;
   const openFromCard = (id: string) => {
     const el = document.querySelector(`[data-card="${id}"]`);
     if (el) onOpen(id, el.getBoundingClientRect());
   };
+  const recording = phase === "recording";
 
   return (
-    <main className="fixed inset-0 overflow-hidden bg-black text-white select-none">
+    <main className={`fixed inset-0 overflow-hidden select-none ${phase === "idle" ? "bg-white text-ink" : "bg-black text-white"}`}>
       <video
         ref={videoRef}
         playsInline
@@ -588,81 +638,177 @@ export default function CaptureScreen() {
       />
       <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
 
-      {phase === "idle" && help && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-neutral-900 to-black px-6">
-          <div className="w-full max-w-sm rounded-3xl bg-white/10 p-5 ring-1 ring-white/15">
-            <p className="text-lg font-semibold">{help.title}</p>
-            <ol className="mt-3 list-decimal space-y-2 ps-5 text-[15px] leading-snug text-neutral-200">
-              {help.steps.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-            <p className="mt-4 text-sm text-neutral-400">Ensuite, touchez le bouton rouge.</p>
-          </div>
+      {phase === "idle" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-white px-6 pb-28 text-center">
+          {help ? (
+            <div className="ui-card w-full max-w-sm p-5 text-start">
+              <p className="text-base font-medium">{help.title}</p>
+              <ol className="mt-3 list-decimal space-y-2 ps-5 text-sm leading-snug text-ink-2">
+                {help.steps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
+              <p className="mt-4 text-[13px] text-ink-3">Ensuite, touchez le bouton rouge.</p>
+            </div>
+          ) : (
+            <>
+              <p className="text-[22px] leading-tight font-semibold tracking-tight">Filmez vos produits et parlez</p>
+              <p className="mt-2 text-base text-ink-3" dir="rtl">
+                صوّر السلعة ديالك و هضر
+              </p>
+              <p className="mt-4 max-w-xs text-sm leading-snug text-ink-3">
+                Montrez un produit au centre, puis dites son prix. Exemple : « hada b miya », « 20% de remise ».
+              </p>
+            </>
+          )}
         </div>
       )}
 
-      {phase === "idle" && !help && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-neutral-900 to-black px-8 text-center">
-          <p className="text-2xl font-semibold">Filmez vos produits et parlez</p>
-          <p className="text-lg text-neutral-300" dir="rtl">
-            صوّر السلعة ديالك و هضر
-          </p>
-          <p className="max-w-xs text-sm text-neutral-400">
-            Hold each product still in the middle, then say its price. Example: &ldquo;hada b miya&rdquo;, &ldquo;20% off&rdquo;.
-          </p>
-        </div>
-      )}
-
-      {/* product tray */}
-      <aside className="absolute inset-y-0 end-0 flex w-[30vw] max-w-36 flex-col gap-2 overflow-y-auto px-2 pt-14 pb-40">
+      {/* product tray: ends above the text and the controls */}
+      <aside className="absolute end-0 top-[max(3.25rem,calc(env(safe-area-inset-top)+2.5rem))] bottom-[calc(10.5rem+env(safe-area-inset-bottom))] flex w-[30vw] max-w-[8.5rem] flex-col gap-3 overflow-y-auto ps-1 pe-2.5 pt-2 pb-2">
         {products.map((p) => (
           <ProductCard
             key={p.id}
             p={p}
             current={p.id === session.currentId}
-            attaching={p.id === attachId}
             flash={flash?.id === p.id ? flash.n : 0}
             onOpen={onOpen}
-            onRemove={onRemove}
-            onAttach={onAttach}
+            onRemove={setConfirmId}
           />
         ))}
       </aside>
 
       {/* top bar */}
-      <div className="absolute inset-x-0 top-0 flex items-center gap-2 p-3 text-xs">
-        {phase === "recording" && (
-          <span className="flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" /> REC
+      <div className="absolute inset-x-0 top-0 flex items-center gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-xs">
+        {recording && (
+          <span className="flex items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1 font-medium backdrop-blur">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" /> REC
           </span>
         )}
-        {detectorState === "loading" && <span className="rounded-full bg-black/50 px-2.5 py-1">Loading detector…</span>}
-        {detectorState === "failed" && (
-          <span className="rounded-full bg-black/50 px-2.5 py-1">No detector: tap a product</span>
+        {recording && detectorState === "loading" && <span className="rounded-full bg-black/45 px-2.5 py-1 backdrop-blur">Préparation…</span>}
+        {recording && detectorState === "failed" && (
+          <span className="rounded-full bg-black/45 px-2.5 py-1 backdrop-blur">Touchez un produit pour le prendre</span>
         )}
-        <button
-          onClick={() => setShowMetrics((v) => !v)}
-          className="ms-auto rounded-full bg-black/50 px-2.5 py-1 font-mono"
-          aria-label="Latency"
-        >
-          ⏱ {metricsView.captureP50 != null ? `${(metricsView.captureP50 / 1000).toFixed(1)}s` : "–"} /{" "}
-          {metricsView.commandP50 != null ? `${(metricsView.commandP50 / 1000).toFixed(1)}s` : "–"}
-        </button>
+        {debug && (
+          <button
+            onClick={() => setShowMetrics((v) => !v)}
+            className="ms-auto rounded-full bg-black/45 px-2.5 py-1 font-mono backdrop-blur"
+            aria-label="Latence"
+          >
+            ⏱ {metricsView.captureP50 != null ? `${(metricsView.captureP50 / 1000).toFixed(1)}s` : "–"} /{" "}
+            {metricsView.commandP50 != null ? `${(metricsView.commandP50 / 1000).toFixed(1)}s` : "–"}
+          </button>
+        )}
       </div>
 
       {attachProduct && (
-        <div className="absolute inset-x-0 top-12 z-10 flex justify-center px-3">
-          <div className="flex items-center gap-3 rounded-full bg-sky-400 py-1.5 ps-4 pe-1.5 text-sm font-medium text-black shadow-lg">
+        <div className="absolute inset-x-0 top-14 z-10 flex justify-center px-3">
+          <div className="flex items-center gap-3 rounded-full bg-white py-1 ps-4 pe-1 text-sm font-medium text-ink shadow-lg">
             <span dir="auto" className="truncate">
               Photos pour « {displayName(attachProduct)} »
             </span>
-            <button type="button" onClick={() => setAttach(null)} className="rounded-full bg-black px-3 py-1 text-white">
+            <button type="button" onClick={() => setAttach(null)} className="ui-btn ui-btn-primary h-8 rounded-full px-3">
               OK
             </button>
           </div>
         </div>
       )}
+
+      {/* shutter: white flash, then each shot flies into its card */}
+      {shutterN > 0 && <div key={shutterN} className="shutter-flash pointer-events-none absolute inset-0 bg-white" />}
+      {shots.map((shot) => (
+        <FlyingShot key={shot.id} shot={shot} onDone={() => setShots((l) => l.filter((x) => x.id !== shot.id))} />
+      ))}
+
+      {/* one centered line of text, two lines at most */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-[calc(6.25rem+env(safe-area-inset-bottom))] z-10 flex justify-center px-4">
+        {latest ? (
+          <p
+            key={latest.id}
+            dir="auto"
+            className={`line-clamp-2 max-w-[min(88vw,24rem)] rounded-2xl px-3.5 py-2 text-center text-sm leading-snug shadow-lg ${
+              latest.kind === "error"
+                ? "bg-white font-medium text-danger"
+                : latest.kind === "question"
+                  ? "bg-white font-medium text-ink"
+                  : latest.kind === "pending"
+                    ? "bg-black/45 text-white/75 backdrop-blur"
+                    : "bg-black/55 text-white backdrop-blur"
+            }`}
+          >
+            {latest.text}
+          </p>
+        ) : showHint ? (
+          <p className="rounded-2xl bg-black/45 px-3.5 py-2 text-center text-sm text-white/90 backdrop-blur">
+            Montrez le produit suivant
+          </p>
+        ) : question ? (
+          <div className="pointer-events-auto flex max-w-[min(92vw,26rem)] items-center gap-2 rounded-2xl bg-white py-1.5 ps-3.5 pe-1.5 text-ink shadow-lg">
+            <button type="button" onClick={() => openFromCard(question.productId)} className="min-w-0 flex-1 py-0.5">
+              <p dir="auto" className="line-clamp-2 text-center text-sm leading-snug font-medium">
+                {question.text}
+              </p>
+            </button>
+            {question.action && (
+              <button
+                type="button"
+                onClick={() => setSession(editProduct(sessionRef.current, question.productId, question.action!.patch))}
+                className="ui-btn ui-btn-primary h-8 shrink-0 px-3 text-[13px]"
+              >
+                {question.action.label}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setDismissed((d) => [...d, keyOf(question)])}
+              aria-label="Plus tard"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-soft"
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                <path d="M1.5 1.5l7 7m0-7l-7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {/* controls: small record button with echoes while the merchant talks, "+" for the next product */}
+      <div className="absolute inset-x-0 bottom-0 flex h-[calc(5.5rem+env(safe-area-inset-bottom))] items-start justify-center pt-3">
+        <button
+          onClick={recording ? stop : start}
+          disabled={phase === "starting"}
+          aria-label={recording ? "Arrêter" : "Filmer"}
+          className={`relative flex h-16 w-16 items-center justify-center rounded-full ring-[3px] ${
+            phase === "idle" ? "ring-ink/80" : "ring-white"
+          }`}
+        >
+          {recording && level.speaking && (
+            <>
+              <span className="echo" />
+              <span className="echo" />
+              <span className="echo" />
+            </>
+          )}
+          <span
+            className={`block bg-red-500 transition-all duration-200 ${recording ? "h-6 w-6 rounded-md" : "h-[52px] w-[52px] rounded-full"}`}
+          />
+        </button>
+        {recording && session.products.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setArmed(true)}
+            aria-label="Produit suivant"
+            aria-pressed={armed}
+            className={`absolute end-5 top-4 flex h-12 w-12 items-center justify-center rounded-full ring-1 backdrop-blur transition-colors ${
+              armed ? "armed-pulse bg-white text-ink ring-white" : "bg-white/20 text-white ring-white/40"
+            }`}
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+              <path d="M9 2v14M2 9h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
+      </div>
 
       {openProduct && open && (
         <ProductSheet
@@ -672,90 +818,33 @@ export default function CaptureScreen() {
           attaching={attachId === openProduct.id}
           onClose={() => setOpen(null)}
           onEdit={(patch) => setSession(editProduct(sessionRef.current, openProduct.id, patch))}
+          onUseAll={() => applySuggestions(openProduct.id)}
           onRemoveImage={(imageId) => setSession(dropImage(sessionRef.current, openProduct.id, imageId))}
           onCover={(imageId) => setSession(makeCover(sessionRef.current, openProduct.id, imageId))}
           onAttach={() => onAttach(openProduct.id)}
           onBetterPhotos={() => runEffect({ kind: "better_photos", productId: openProduct.id })}
           onCheckPrice={() => runEffect({ kind: "check_price", productId: openProduct.id })}
+          onRemove={() => setConfirmId(openProduct.id)}
         />
       )}
 
-      {showMetrics && (
-        <MetricsPanel m={metricsView} upload={upload} onClose={() => setShowMetrics(false)} />
+      {confirmProduct && (
+        <ConfirmRemove
+          p={confirmProduct}
+          onCancel={() => setConfirmId(null)}
+          onConfirm={() => {
+            removeNow(confirmProduct.id);
+            setConfirmId(null);
+          }}
+        />
       )}
 
-      {/* shutter: white flash, then each shot flies into its card */}
-      {shutterN > 0 && <div key={shutterN} className="shutter-flash pointer-events-none absolute inset-0 bg-white" />}
-      {shots.map((shot) => (
-        <FlyingShot key={shot.id} shot={shot} onDone={() => setShots((l) => l.filter((x) => x.id !== shot.id))} />
-      ))}
-
-      {/* text band: its own strip above the record button, left of the tray, never over the cards */}
-      <div className="pointer-events-none absolute start-3 end-[calc(min(30vw,9rem)+0.75rem)] bottom-32 flex flex-col items-start gap-1.5">
-        {question && (
-          <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded-2xl bg-amber-300 py-1 ps-3 pe-1 text-black shadow-lg">
-            <button type="button" onClick={() => openFromCard(question.productId)} className="min-w-0 py-1 text-start">
-              <p dir="auto" className="line-clamp-2 text-[13px] leading-snug font-medium">
-                {question.text}
-              </p>
-            </button>
-            {question.action && (
-              <button
-                type="button"
-                onClick={() => setSession(editProduct(sessionRef.current, question.productId, question.action!.patch))}
-                className="shrink-0 rounded-xl bg-black px-2.5 py-1.5 text-xs font-semibold text-white active:scale-95"
-              >
-                {question.action.label}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setDismissed((d) => [...d, keyOf(question)])}
-              aria-label="Plus tard"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm text-black/60"
-            >
-              ✕
-            </button>
-          </div>
-        )}
-        {captions.slice(-2).map((c) => (
-          <p
-            key={c.id}
-            dir="auto"
-            className={`line-clamp-2 max-w-full rounded-xl px-2.5 py-1 text-[13px] leading-snug backdrop-blur ${
-              c.kind === "error"
-                ? "bg-red-600/85"
-                : c.kind === "question"
-                  ? "bg-amber-300/95 font-medium text-black"
-                  : c.kind === "pending"
-                    ? "bg-black/45 text-neutral-300"
-                    : "bg-black/60"
-            }`}
-          >
-            {c.text}
-          </p>
-        ))}
-      </div>
-
-      {/* record button */}
-      <div className="absolute inset-x-0 bottom-0 flex justify-center pb-[max(2rem,env(safe-area-inset-bottom))]">
-        <button
-          onClick={phase === "recording" ? stop : start}
-          disabled={phase === "starting"}
-          aria-label={phase === "recording" ? "Stop" : "Record"}
-          className="relative flex h-24 w-24 items-center justify-center rounded-full border-4 border-white/90 shadow-lg"
-          style={{ boxShadow: level.speaking ? `0 0 0 ${4 + level.rms * 120}px rgba(255,255,255,0.18)` : undefined }}
-        >
-          <span
-            className={`block bg-red-500 transition-all duration-200 ${
-              phase === "recording" ? "h-9 w-9 rounded-lg" : "h-20 w-20 rounded-full"
-            }`}
-          />
-        </button>
-      </div>
+      {debug && showMetrics && <MetricsPanel m={metricsView} upload={upload} onClose={() => setShowMetrics(false)} />}
     </main>
   );
 }
+
+const noSubscribe = () => () => {};
 
 type Shot = { id: string; url: string; from: { left: number; top: number; width: number; height: number }; productId: string };
 

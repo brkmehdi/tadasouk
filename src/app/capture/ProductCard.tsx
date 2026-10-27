@@ -6,26 +6,28 @@ import { cover, displayName, suggestedPrice, type Product } from "@/lib/capture/
 type Props = {
   p: Product;
   current: boolean;
-  attaching: boolean;
   flash: number; // changes when the camera shows this product again
   onOpen: (id: string, from: DOMRect) => void;
-  onRemove: (id: string) => void;
-  onAttach: (id: string) => void;
+  onRemove: (id: string) => void; // asks for confirmation first
 };
 
-export default function ProductCard({ p, current, attaching, flash, onOpen, onRemove, onAttach }: Props) {
+// Frosted card in the tray over the video. Two fixed lines under the photo (name, price)
+// so a long name never pushes the card taller.
+export default function ProductCard({ p, current, flash, onOpen, onRemove }: Props) {
   const img = cover(p);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (flash) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [flash]);
   const suggested = suggestedPrice(p);
+  const busy = p.research === "running" || p.identify === "loading";
+
   return (
     <div
       ref={ref}
       data-card={p.id}
-      className={`card-pop relative shrink-0 rounded-2xl bg-white/10 p-1.5 backdrop-blur-md transition-all ${
-        attaching ? "ring-2 ring-sky-400" : current ? "ring-2 ring-amber-300" : ""
+      className={`card-pop relative shrink-0 rounded-xl bg-white/15 p-1.5 shadow-lg ring-1 backdrop-blur-xl transition-all ${
+        current ? "ring-2 ring-white" : "ring-white/20"
       } ${p.status === "removing" ? "card-out" : ""}`}
     >
       <button
@@ -34,7 +36,7 @@ export default function ProductCard({ p, current, attaching, flash, onOpen, onRe
         className="block w-full text-start"
         aria-label={`Ouvrir ${displayName(p)}`}
       >
-        <div className="relative aspect-square overflow-hidden rounded-xl bg-white">
+        <div className="relative aspect-square overflow-hidden rounded-lg bg-white">
           {img && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -44,65 +46,59 @@ export default function ProductCard({ p, current, attaching, flash, onOpen, onRe
             />
           )}
           {(img?.pending || p.photos === "loading") && <div className="shimmer absolute inset-0" />}
-          {p.research === "running" && (
-            <span className="absolute start-1 top-1 h-2.5 w-2.5 animate-pulse rounded-full bg-sky-400 ring-2 ring-white" aria-label="Recherche en cours" />
-          )}
+          {busy && <span className="absolute start-1.5 top-1.5 h-2 w-2 animate-pulse rounded-full bg-brand" aria-label="Recherche en cours" />}
           {p.images.length > 1 && (
-            <span className="absolute start-1 bottom-1 rounded-full bg-black/60 px-1.5 text-[10px] leading-4 text-white">
+            <span className="absolute start-1 bottom-1 rounded bg-black/55 px-1 text-[10px] leading-4 text-white tabular-nums">
               {p.images.length}
             </span>
           )}
           {p.question && (
-            <span className="absolute inset-x-0 bottom-1 mx-auto flex h-5 w-5 items-center justify-center rounded-full bg-amber-400 text-xs font-bold text-black">
+            <span className="absolute end-1 bottom-1 flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs font-semibold text-ink shadow">
               ?
             </span>
           )}
         </div>
 
-        {/* name: one fixed line, never pushes the card taller */}
-        <p dir="auto" className="mt-1 h-3.5 truncate text-[11px] leading-[14px] text-neutral-100">
-          {p.name ?? (p.identify === "loading" ? <span className="shimmer inline-block h-2.5 w-14 rounded" /> : <span className="text-neutral-400 italic">Sans nom</span>)}
+        <p dir="auto" className="mt-1.5 h-3.5 truncate px-0.5 text-[11px] leading-[14px] font-medium text-white">
+          {p.name || p.suggested.name ? (
+            displayName(p)
+          ) : busy ? (
+            <span className="shimmer inline-block h-2.5 w-14 rounded" />
+          ) : (
+            <span className="text-white/60">Sans nom</span>
+          )}
         </p>
 
-        {/* price: one fixed line */}
-        <div className="mt-0.5 flex h-5 items-center gap-1 overflow-hidden whitespace-nowrap">
+        <div className="mt-1 flex h-5 items-center gap-1 overflow-hidden px-0.5 whitespace-nowrap">
           {p.price != null ? (
             <>
               <PriceChip value={p.price} currency={p.currency} />
               {p.compareAtPrice != null && (
-                <span className="text-[10px] text-neutral-400 line-through">{formatPrice(p.compareAtPrice, p.currency)}</span>
+                <span className="text-[10px] text-white/60 line-through tabular-nums">{formatPrice(p.compareAtPrice, p.currency)}</span>
               )}
             </>
           ) : suggested != null ? (
-            <span className="rounded-md border border-dashed border-amber-300/80 px-1 font-mono text-[11px] text-amber-200">
+            <span className="rounded border border-dashed border-white/70 px-1 text-[11px] leading-4 text-white tabular-nums">
               ≈ {formatPrice(suggested, p.currency)}
             </span>
+          ) : busy ? (
+            <span className="shimmer block h-4 w-14 rounded" />
           ) : (
-            <span className="shimmer block h-4 w-14 rounded-md" />
+            <span className="text-[11px] text-white/60">Prix ?</span>
           )}
         </div>
       </button>
 
-      {flash > 0 && <span key={flash} className="card-flash pointer-events-none absolute inset-0 rounded-2xl" />}
-      {/* delete */}
+      {flash > 0 && <span key={flash} className="card-flash pointer-events-none absolute inset-0 rounded-xl" />}
       <button
         type="button"
         onClick={() => onRemove(p.id)}
         aria-label={`Supprimer ${displayName(p)}`}
-        className="absolute -end-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/75 text-xs text-white ring-1 ring-white/30 active:scale-90"
+        className="absolute -end-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white ring-1 ring-white/30 backdrop-blur active:scale-90"
       >
-        ✕
-      </button>
-      {/* add photos to this product */}
-      <button
-        type="button"
-        onClick={() => onAttach(p.id)}
-        aria-label={`Ajouter des photos à ${displayName(p)}`}
-        className={`absolute end-2.5 bottom-[3.25rem] flex h-6 w-6 items-center justify-center rounded-full text-base leading-none ring-1 active:scale-90 ${
-          attaching ? "bg-sky-400 text-black ring-sky-200" : "bg-black/75 text-white ring-white/30"
-        }`}
-      >
-        +
+        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+          <path d="M1.5 1.5l7 7m0-7l-7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
       </button>
     </div>
   );
@@ -114,7 +110,7 @@ export function PriceChip({ value, currency }: { value: number; currency: string
   return (
     <span
       key={text}
-      className="type-in rounded-md bg-amber-300 px-1 font-mono text-xs leading-5 font-bold text-black"
+      className="type-in rounded bg-white px-1 text-xs leading-5 font-semibold text-ink tabular-nums"
       style={{ "--chars": text.length } as React.CSSProperties}
     >
       {text}

@@ -9,6 +9,7 @@ import { chatCost, PRICES, reserve, settle } from "@/lib/server/usage";
 export type AgentProduct = {
   id: string;
   name: string | null;
+  suggestedName: string | null;
   label: string | null;
   color: string | null;
   price: number | null;
@@ -90,6 +91,18 @@ const TOOLS = [
     ["product_id"],
   ),
   fn("remove_product", "Remove a product from the store.", { product_id: ref }, ["product_id"]),
+  fn(
+    "next_product",
+    "The merchant is done with this product and will show the next one ('produit suivant', 'next', 'lli mn b3d', 'jib lakhor').",
+    {},
+    [],
+  ),
+  fn(
+    "accept_suggestions",
+    "The merchant accepts what the app proposes for a product: suggested name, description and price ('utilise tout', 'mzyan', 'use all').",
+    { product_id: ref },
+    ["product_id"],
+  ),
   fn("undo_last", "Undo the previous change.", {}, []),
   fn(
     "ask_merchant",
