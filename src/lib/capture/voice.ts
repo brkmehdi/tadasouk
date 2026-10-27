@@ -27,14 +27,43 @@ class Tap extends AudioWorkletProcessor {
 registerProcessor("tap", Tap);
 `;
 
-export async function startVoice(stream: MediaStream, ev: VoiceEvents) {
-  const ctx = new AudioContext({ sampleRate: RATE });
+// `ctx` must be created inside the tap on the record button: iOS keeps an AudioContext made
+// later silent. It runs at the device rate (often 48 kHz); chunks are downsampled to 16 kHz here.
+export async function startVoice(ctx: AudioContext, stream: MediaStream, ev: VoiceEvents) {
+  if (ctx.state === "suspended") await ctx.resume().catch(() => {});
   const url = URL.createObjectURL(new Blob([WORKLET], { type: "text/javascript" }));
   await ctx.audioWorklet.addModule(url);
   URL.revokeObjectURL(url);
   const source = ctx.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
   const tap = new AudioWorkletNode(ctx, "tap");
   source.connect(tap);
+  // Some browsers only run a node that reaches the speakers; a muted gain keeps it silent.
+  const mute = ctx.createGain();
+  mute.gain.value = 0;
+  tap.connect(mute).connect(ctx.destination);
+
+  // Box-filter downsampling to 16 kHz: average the input samples that fall in each output slot.
+  const ratio = ctx.sampleRate / RATE;
+  let acc = 0;
+  let accN = 0;
+  let phase = 0;
+  const downsample = (input: Float32Array) => {
+    if (ratio === 1) return input;
+    const out = new Float32Array(Math.ceil(input.length / ratio) + 1);
+    let n = 0;
+    for (let i = 0; i < input.length; i++) {
+      acc += input[i];
+      accN++;
+      phase += 1;
+      if (phase >= ratio) {
+        out[n++] = acc / accN;
+        acc = 0;
+        accN = 0;
+        phase -= ratio;
+      }
+    }
+    return out.subarray(0, n);
+  };
 
   let pending = new Float32Array(0);
   const preRoll: Float32Array[] = [];
@@ -54,9 +83,10 @@ export async function startVoice(stream: MediaStream, ev: VoiceEvents) {
   };
 
   tap.port.onmessage = (e: MessageEvent<Float32Array>) => {
-    const merged = new Float32Array(pending.length + e.data.length);
+    const input = downsample(e.data);
+    const merged = new Float32Array(pending.length + input.length);
     merged.set(pending);
-    merged.set(e.data, pending.length);
+    merged.set(input, pending.length);
     let offset = 0;
     while (merged.length - offset >= FRAME) {
       const frame = merged.slice(offset, offset + FRAME);
@@ -96,7 +126,8 @@ export async function startVoice(stream: MediaStream, ev: VoiceEvents) {
       tap.port.onmessage = null;
       source.disconnect();
       tap.disconnect();
-      await ctx.close();
+      mute.disconnect();
+      await ctx.close().catch(() => {});
     },
   };
 }

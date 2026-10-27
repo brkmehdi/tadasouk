@@ -25,6 +25,7 @@ import {
   type SessionState,
   type ToolCall,
 } from "@/lib/capture/session";
+import { explainMediaError, openCamera, type MediaHelp } from "@/lib/capture/media";
 import { startVoice } from "@/lib/capture/voice";
 import ProductCard, { formatPrice } from "./ProductCard";
 import ProductSheet from "./ProductSheet";
@@ -73,6 +74,7 @@ export default function CaptureScreen() {
   const [attachId, setAttachIdState] = useState<string | null>(null);
   const [open, setOpen] = useState<{ id: string; from: DOMRect } | null>(null);
   const [flash, setFlash] = useState<{ id: string; n: number } | null>(null);
+  const [help, setHelp] = useState<MediaHelp | null>(null);
 
   const setSession = useCallback((next: SessionState) => {
     sessionRef.current = next;
@@ -329,7 +331,10 @@ export default function CaptureScreen() {
 
   // ---------- start / stop ----------
   const start = useCallback(async () => {
+    // Created inside the tap, before any await: iOS keeps audio started later silent.
+    const audioCtx = new AudioContext();
     setPhase("starting");
+    setHelp(null);
     setUpload(null);
     sessionIdRef.current = crypto.randomUUID();
     metricsRef.current = emptyMetrics();
@@ -339,17 +344,26 @@ export default function CaptureScreen() {
     setOpen(null);
     sigsRef.current.clear();
     setCaptions([]);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
-      });
-      streamRef.current = stream;
-      const video = videoRef.current!;
-      video.srcObject = stream;
-      await video.play();
-      startedAtRef.current = performance.now();
 
+    // The camera is the only step that must work; the others degrade with a caption.
+    let stream: MediaStream;
+    try {
+      stream = await openCamera();
+    } catch (err) {
+      audioCtx.close().catch(() => {});
+      setHelp(explainMediaError(err));
+      setPhase("idle");
+      return;
+    }
+    streamRef.current = stream;
+    const video = videoRef.current!;
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    await video.play().catch(() => caption("Touchez l'écran si l'image reste figée", "pending"));
+    startedAtRef.current = performance.now();
+
+    try {
       const mime = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm"].find((t) =>
         MediaRecorder.isTypeSupported(t),
       );
@@ -359,8 +373,13 @@ export default function CaptureScreen() {
       rec.onstop = () => uploadVideo(new Blob(chunks, { type: rec.mimeType }), sessionIdRef.current, setUpload);
       rec.start(1000);
       recorderRef.current = rec;
+    } catch {
+      recorderRef.current = null;
+      setUpload("not recorded on this phone");
+    }
 
-      voiceRef.current = await startVoice(stream, {
+    try {
+      voiceRef.current = await startVoice(audioCtx, stream, {
         onSpeechStart: () => {
           const v = videoRef.current;
           if (v) speechSnapRef.current = grabKeyframe(v, targetRef.current?.box ?? centerBox(v));
@@ -368,27 +387,26 @@ export default function CaptureScreen() {
         onChunk: handleChunk,
         onLevel: (rms, speaking) => setLevel({ rms, speaking }),
       });
-
-      wakeLockRef.current = await navigator.wakeLock?.request("screen").catch(() => null);
-      setPhase("recording");
-      const frame = () => {
-        step();
-        loopRef.current = requestAnimationFrame(frame);
-      };
-      loopRef.current = requestAnimationFrame(frame);
-
-      if (!detectorRef.current) {
-        setDetectorState("loading");
-        createDetector()
-          .then((d) => {
-            detectorRef.current = d;
-            setDetectorState("ready");
-          })
-          .catch(() => setDetectorState("failed"));
-      }
     } catch (err) {
-      caption(err instanceof Error ? err.message : String(err), "error");
-      setPhase("idle");
+      caption(`Micro indisponible : ${err instanceof Error ? err.message : String(err)}`, "error");
+    }
+
+    wakeLockRef.current = (await navigator.wakeLock?.request("screen").catch(() => null)) ?? null;
+    setPhase("recording");
+    const frame = () => {
+      step();
+      loopRef.current = requestAnimationFrame(frame);
+    };
+    loopRef.current = requestAnimationFrame(frame);
+
+    if (!detectorRef.current) {
+      setDetectorState("loading");
+      createDetector()
+        .then((d) => {
+          detectorRef.current = d;
+          setDetectorState("ready");
+        })
+        .catch(() => setDetectorState("failed"));
     }
   }, [caption, handleChunk, step, refreshMetrics, setAttach, setSession]);
 
@@ -461,13 +479,28 @@ export default function CaptureScreen() {
       <video
         ref={videoRef}
         playsInline
+        autoPlay
         muted
         className="absolute inset-0 h-full w-full object-cover"
         onPointerDown={onTap}
       />
       <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
 
-      {phase === "idle" && (
+      {phase === "idle" && help && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-neutral-900 to-black px-6">
+          <div className="w-full max-w-sm rounded-3xl bg-white/10 p-5 ring-1 ring-white/15">
+            <p className="text-lg font-semibold">{help.title}</p>
+            <ol className="mt-3 list-decimal space-y-2 ps-5 text-[15px] leading-snug text-neutral-200">
+              {help.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+            <p className="mt-4 text-sm text-neutral-400">Ensuite, touchez le bouton rouge.</p>
+          </div>
+        </div>
+      )}
+
+      {phase === "idle" && !help && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-neutral-900 to-black px-8 text-center">
           <p className="text-2xl font-semibold">Filmez vos produits et parlez</p>
           <p className="text-lg text-neutral-300" dir="rtl">
