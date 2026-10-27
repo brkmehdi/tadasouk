@@ -48,6 +48,43 @@ export async function metaFetch(path: string, init: RequestInit & { accept?: str
   return res;
 }
 
+type ResponsesOutput = {
+  output?: { type: string; content?: { type: string; text?: string }[] }[];
+  usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } };
+};
+
+// One non-streaming Responses API call whose answer is constrained to `schema`
+// (docs/structured-output). Returns the parsed JSON, token usage and web searches run.
+export async function responsesJson<T>(body: Record<string, unknown>, name: string, schema: object) {
+  const res = await metaFetch("/responses", {
+    method: "POST",
+    accept: "application/json",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...body, text: { format: { type: "json_schema", name, strict: true, schema } } }),
+  });
+  const data = (await res.json()) as ResponsesOutput;
+  const text = data.output
+    ?.filter((o) => o.type === "message")
+    .flatMap((o) => o.content ?? [])
+    .filter((c) => c.type === "output_text")
+    .at(-1)?.text;
+  let parsed: T | null = null;
+  try {
+    parsed = text ? (JSON.parse(text) as T) : null;
+  } catch {
+    // Left null; the caller answers with an error.
+  }
+  return {
+    parsed,
+    searches: data.output?.filter((o) => o.type === "web_search_call").length ?? 0,
+    usage: {
+      prompt_tokens: data.usage?.input_tokens,
+      completion_tokens: data.usage?.output_tokens,
+      prompt_tokens_details: { cached_tokens: data.usage?.input_tokens_details?.cached_tokens },
+    },
+  };
+}
+
 // Maps known failures to JSON the capture screen can show in its caption line.
 export function errorResponse(err: unknown) {
   if (err instanceof SpendingCapError) {

@@ -4,8 +4,10 @@
 export type ProductImage = {
   id: string;
   url: string;
-  source: "camera" | "ai";
+  // camera: real photo on white; studio: real pixels on an AI backdrop; ai: generated from web references
+  source: "camera" | "studio" | "ai";
   pending: boolean; // camera: SAM cutout not back yet, url is the instant crop
+  cutoutUrl?: string; // camera: transparent cutout, input of the studio photo
 };
 
 export type PriceCheck =
@@ -17,6 +19,7 @@ export type PriceCheck =
       low: number | null;
       average: number | null;
       high: number | null;
+      suggested: number | null;
       verdict: "cheap" | "fair" | "expensive" | "unknown";
       note: string;
       sources: { title: string; url: string; price: number | null }[];
@@ -26,6 +29,10 @@ export type Product = {
   id: string;
   order: number;
   name: string | null;
+  nameAr: string | null;
+  category: string | null;
+  identify: "idle" | "loading" | "done" | "failed"; // AI naming from the photo
+  research: "idle" | "running" | "done"; // studio photos, web photos, prices once the product is done
   label: string | null; // what the on-device detector called it, e.g. "bottle"
   color: string | null; // dominant color of the cutout, for "the red one"
   images: ProductImage[]; // first one is the cover
@@ -71,6 +78,31 @@ export function displayName(p: Product) {
   return p.name ?? (p.label ? p.label[0].toUpperCase() + p.label.slice(1) : "Produit");
 }
 
+export function suggestedPrice(p: Product) {
+  return p.priceCheck?.status === "done" ? p.priceCheck.suggested : null;
+}
+
+export type Question = { productId: string; text: string; action?: { label: string; patch: Partial<Product> } };
+
+// The one thing to ask the merchant next about a product, most important first.
+export function nextQuestion(p: Product): Question | null {
+  if (p.status !== "active" || p.images.some((i) => i.pending) || p.identify === "loading") return null;
+  const name = displayName(p);
+  if (p.price == null) {
+    const s = suggestedPrice(p);
+    return s != null
+      ? {
+          productId: p.id,
+          text: `Prix de « ${name} » ? Conseillé : ${s} ${p.currency === "EUR" ? "€" : "DH"}`,
+          action: { label: `Mettre ${s}`, patch: { price: s, compareAtPrice: null } },
+        }
+      : { productId: p.id, text: `Quel est le prix de « ${name} » ?` };
+  }
+  if (!p.name) return { productId: p.id, text: "Comment s’appelle ce produit ?" };
+  if (p.quantity == null) return { productId: p.id, text: `Combien de « ${name} » avez-vous ?` };
+  return null;
+}
+
 // Compact copy of the state for the agent: ids, names, prices, and capture order.
 export function agentView(state: SessionState) {
   const list = visible(state).sort((a, b) => a.order - b.order);
@@ -88,7 +120,13 @@ export function agentView(state: SessionState) {
       quantity: p.quantity,
       description: p.description,
       photos: p.images.length,
+      suggestedPrice: suggestedPrice(p),
     })),
+    openQuestion: (() => {
+      const cur = list.find((p) => p.id === state.currentId);
+      const q = cur ? nextQuestion(cur) : null;
+      return q ? { productId: q.productId, text: q.text } : null;
+    })(),
   };
 }
 
@@ -101,6 +139,10 @@ function blank(state: SessionState, id: string): Product {
     id,
     order: nextOrder(state),
     name: null,
+    nameAr: null,
+    category: null,
+    identify: "idle",
+    research: "idle",
     label: null,
     color: null,
     images: [],
@@ -195,6 +237,10 @@ function undo(state: SessionState): SessionState {
       label: now.label,
       photos: now.photos,
       priceCheck: now.priceCheck,
+      identify: now.identify,
+      research: now.research,
+      nameAr: now.nameAr,
+      category: now.category,
       status: now.status === "removing" ? "active" : now.status,
     } satisfies Product;
   });

@@ -3,7 +3,7 @@
 // Tap a card: it grows into this sheet over the lower part of the video. Recording keeps
 // running, and voice commands apply to the open product. Close: it shrinks back to its card.
 
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { displayName, type PriceCheck, type Product } from "@/lib/capture/session";
 import { formatPrice } from "./ProductCard";
 
@@ -65,16 +65,25 @@ export default function ProductSheet(props: Props) {
       role="dialog"
       aria-label={displayName(p)}
     >
-      <div className="flex items-center gap-2 px-4 pt-3">
+      <div className="flex items-start gap-2 px-4 pt-3">
+        <div className="min-w-0 flex-1">
         <input
           key={`name-${p.id}-${p.name}`}
           dir="auto"
           defaultValue={p.name ?? ""}
           placeholder={displayName(p)}
           onBlur={(e) => e.target.value.trim() !== (p.name ?? "") && onEdit({ name: e.target.value.trim() || null })}
-          className="min-w-0 flex-1 bg-transparent text-lg font-semibold outline-none placeholder:text-neutral-500"
+          className="w-full bg-transparent text-lg font-semibold outline-none placeholder:text-neutral-500"
           aria-label="Nom du produit"
         />
+          {(p.nameAr || p.category) && (
+            <p className="truncate text-xs text-neutral-400">
+              {p.category}
+              {p.category && p.nameAr ? " · " : ""}
+              {p.nameAr && <span dir="rtl">{p.nameAr}</span>}
+            </p>
+          )}
+        </div>
         <button
           type="button"
           onClick={close}
@@ -94,16 +103,18 @@ export default function ProductSheet(props: Props) {
                 type="button"
                 onClick={() => props.onCover(img.id)}
                 aria-label={i === 0 ? "Photo principale" : "Mettre en photo principale"}
-                className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl ${
-                  img.source === "ai" ? "bg-neutral-100" : "bg-white/5"
-                } ${i === 0 ? "ring-2 ring-amber-300" : ""}`}
+                className={`flex aspect-square w-full items-center justify-center overflow-hidden rounded-2xl bg-white ${
+                  i === 0 ? "ring-2 ring-amber-300" : ""
+                }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={img.url} alt="" className={`max-h-full max-w-full object-contain ${img.pending ? "opacity-60" : ""}`} />
                 {img.pending && <span className="shimmer absolute inset-0 rounded-2xl" />}
               </button>
-              {img.source === "ai" && (
-                <span className="absolute start-1.5 bottom-1.5 rounded-full bg-black/70 px-1.5 text-[10px]">IA</span>
+              {img.source !== "camera" && (
+                <span className="absolute start-1.5 bottom-1.5 rounded-full bg-black/70 px-1.5 text-[10px]">
+                  {img.source === "studio" ? "Studio" : "IA web"}
+                </span>
               )}
               <button
                 type="button"
@@ -195,7 +206,14 @@ export default function ProductSheet(props: Props) {
         </div>
         {p.photos === "error" && <p className="mt-2 text-sm text-red-300">Les photos n&apos;ont pas pu être créées.</p>}
 
-        {p.priceCheck && <PriceCheckView check={p.priceCheck} price={p.price} currency={p.currency} />}
+        {p.priceCheck && (
+          <PriceCheckView
+            check={p.priceCheck}
+            price={p.price}
+            currency={p.currency}
+            onUse={(v) => onEdit({ price: v, compareAtPrice: null })}
+          />
+        )}
       </div>
     </div>
   );
@@ -208,7 +226,19 @@ const VERDICT: Record<string, { text: string; className: string }> = {
   unknown: { text: "Pas assez de prix trouvés", className: "bg-white/20" },
 };
 
-function PriceCheckView({ check, price, currency }: { check: PriceCheck; price: number | null; currency: string }) {
+// Suggested price first; the range, note and sources open on demand.
+function PriceCheckView({
+  check,
+  price,
+  currency,
+  onUse,
+}: {
+  check: PriceCheck;
+  price: number | null;
+  currency: string;
+  onUse: (v: number) => void;
+}) {
+  const [details, setDetails] = useState(false);
   if (check.status === "loading") {
     return (
       <div className="mt-3 rounded-2xl bg-white/5 p-3">
@@ -220,61 +250,94 @@ function PriceCheckView({ check, price, currency }: { check: PriceCheck; price: 
   if (check.status === "error") {
     return <p className="mt-3 text-sm text-red-300">{check.message}</p>;
   }
-  const { low, average, high } = check;
-  const values = [low, average, high, price].filter((v): v is number => v != null);
+  const { low, average, high, suggested } = check;
+  const cur = check.currency || currency;
+  const fmt = (v: number | null) => (v == null ? "—" : formatPrice(Math.round(v * 100) / 100, cur));
+  const values = [low, high, suggested, price].filter((v): v is number => v != null);
   const min = Math.min(...values);
   const max = Math.max(...values);
   const pos = (v: number) => (max > min ? ((v - min) / (max - min)) * 100 : 50);
-  const verdict = VERDICT[check.verdict] ?? VERDICT.unknown;
-  const fmt = (v: number | null) => (v == null ? "—" : formatPrice(Math.round(v * 100) / 100, check.currency || currency));
+  const verdict = price != null ? (VERDICT[check.verdict] ?? VERDICT.unknown) : null;
 
   return (
     <div className="mt-3 rounded-2xl bg-white/5 p-3">
-      <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${verdict.className}`}>{verdict.text}</span>
-      <div className="mt-3 grid grid-cols-3 text-center">
-        {(
-          [
-            ["Le plus bas", low],
-            ["Moyenne", average],
-            ["Le plus haut", high],
-          ] as const
-        ).map(([k, v]) => (
-          <div key={k}>
-            <p className="text-[11px] text-neutral-400">{k}</p>
-            <p className="font-mono text-sm font-semibold">{fmt(v)}</p>
-          </div>
-        ))}
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] text-neutral-400">Prix conseillé au Maroc</p>
+          <p className="font-mono text-xl font-bold">{fmt(suggested)}</p>
+        </div>
+        {suggested != null && suggested !== price && (
+          <button
+            type="button"
+            onClick={() => onUse(suggested)}
+            className="rounded-xl bg-amber-300 px-3 py-2 text-sm font-semibold text-black active:scale-95"
+          >
+            Utiliser
+          </button>
+        )}
       </div>
-      {values.length > 1 && (
-        <div className="relative mx-1 mt-3 h-2 rounded-full bg-gradient-to-r from-emerald-400 via-sky-400 to-rose-400">
-          {average != null && (
-            <span className="absolute top-1/2 h-3 w-0.5 -translate-y-1/2 bg-white/80" style={{ left: `${pos(average)}%` }} />
+      <div className="mt-2 flex items-center gap-2">
+        {verdict && (
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${verdict.className}`}>{verdict.text}</span>
+        )}
+        <button
+          type="button"
+          onClick={() => setDetails((d) => !d)}
+          aria-expanded={details}
+          className="ms-auto text-xs text-sky-300 underline-offset-2 hover:underline"
+        >
+          {details ? "Masquer" : "Détails"}
+        </button>
+      </div>
+
+      {details && (
+        <div className="mt-3">
+          <div className="grid grid-cols-3 text-center">
+            {(
+              [
+                ["Le plus bas", low],
+                ["Moyenne", average],
+                ["Le plus haut", high],
+              ] as const
+            ).map(([k, v]) => (
+              <div key={k}>
+                <p className="text-[11px] text-neutral-400">{k}</p>
+                <p className="font-mono text-sm font-semibold">{fmt(v)}</p>
+              </div>
+            ))}
+          </div>
+          {values.length > 1 && (
+            <div className="relative mx-1 mt-3 h-2 rounded-full bg-gradient-to-r from-emerald-400 via-sky-400 to-rose-400">
+              {suggested != null && (
+                <span className="absolute top-1/2 h-3.5 w-0.5 -translate-y-1/2 bg-white" style={{ left: `${pos(suggested)}%` }} title="Conseillé" />
+              )}
+              {price != null && (
+                <span
+                  className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black bg-amber-300"
+                  style={{ left: `${pos(price)}%` }}
+                  title="Votre prix"
+                />
+              )}
+            </div>
           )}
-          {price != null && (
-            <span
-              className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black bg-amber-300"
-              style={{ left: `${pos(price)}%` }}
-              title="Votre prix"
-            />
+          {check.note && (
+            <p dir="auto" className="mt-3 text-sm leading-snug text-neutral-300">
+              {check.note}
+            </p>
+          )}
+          {check.sources.length > 0 && (
+            <ul className="mt-2 space-y-1">
+              {check.sources.slice(0, 5).map((src) => (
+                <li key={src.url + src.title} className="flex gap-2 text-xs">
+                  <a href={src.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sky-300 underline">
+                    {src.title}
+                  </a>
+                  {src.price != null && <span className="font-mono">{fmt(src.price)}</span>}
+                </li>
+              ))}
+            </ul>
           )}
         </div>
-      )}
-      {check.note && (
-        <p dir="auto" className="mt-3 text-sm leading-snug text-neutral-300">
-          {check.note}
-        </p>
-      )}
-      {check.sources.length > 0 && (
-        <ul className="mt-2 space-y-1">
-          {check.sources.slice(0, 5).map((s) => (
-            <li key={s.url + s.title} className="flex gap-2 text-xs">
-              <a href={s.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-sky-300 underline">
-                {s.title}
-              </a>
-              {s.price != null && <span className="font-mono">{fmt(s.price)}</span>}
-            </li>
-          ))}
-        </ul>
       )}
     </div>
   );

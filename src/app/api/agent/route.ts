@@ -16,6 +16,7 @@ export type AgentProduct = {
   quantity: number | null;
   description: string | null;
   photos: number;
+  suggestedPrice: number | null;
 };
 
 export type AgentState = {
@@ -23,6 +24,7 @@ export type AgentState = {
   currentId: string | null;
   products: AgentProduct[];
   recent: string[];
+  openQuestion: { productId: string; text: string } | null;
 };
 
 type Body = { sessionId: string; transcript: string; state: AgentState };
@@ -103,7 +105,8 @@ You receive one transcript chunk and the session state. Respond ONLY with tool c
 If the chunk is small talk or not about the products, call no tool and reply with an empty message.
 "this one", "hada", "hadi", "celui-ci" mean the current product. "the previous one", "lli 9bel" mean the product captured just before it.
 Numbers can be spoken in Darija (miya = 100, mitayn = 200, khamsin = 50, alf = 1000) or French.
-Never invent a product id; use ids from the state. If you are unsure, call ask_merchant.`;
+Never invent a product id; use ids from the state. If you are unsure, call ask_merchant.
+The state may carry an openQuestion the app just asked the merchant (for example the price, with a suggestedPrice on that product). A short "oui", "wakha", "ok" or "yes" answers it: for a price question, call set_price with the suggestedPrice of that product. A number answers it with that number.`;
 
 export async function POST(req: Request) {
   let body: Body;

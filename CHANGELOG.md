@@ -40,6 +40,23 @@ Phase 0, live capture spike.
   plus difference hash, robust to light and tilt) is checked on the crop before SAM and on the
   cutout after it. The existing card pulses and becomes the current product instead. A tap
   still forces a capture.
+- Capture effect: white flash, synthesized shutter click, the shot zooms and flies into its card.
+- Default product photo: the SAM cutout on white with a soft contact shadow, made on the phone.
+- Naming: `/api/identify` (muse-spark-1.3 image understanding, JSON output) names each new
+  product in French and Arabic, with a category and a description draft.
+- When the merchant moves on to the next product (or stops), research runs in the background:
+  studio version of the real photos (`/api/studio-photo`: muse-image-1.0 paints backdrop and
+  shadow only; the real cutout is pasted back and a fidelity check rejects a moved product),
+  web-guided photos, and the price check, which now returns a suggested price.
+- One question at a time about what is missing (price with a one-tap suggested price, name,
+  stock); "oui / wakha" by voice accepts the suggestion.
+- Cards: fixed name and price lines; a dashed "≈ suggested" chip until a price is set.
+  Captions sit in their own band, never over the tray. Product sheet shows the suggested price
+  first, with "Détails" for lowest / average / highest, the note and sources.
+- Tap capture: four SAM prompts in one request (point alone and point plus three box sizes),
+  the most confident mask kept and nested masks merged back, so tapping a label still cuts out
+  the whole product.
+- Caps raised to $1.50 per session and $10 per day for the background research.
 - Live preview on Cloudflare Workers. Cache Components turned off: it hangs in the Workers runtime.
 - Latency panel on the record screen: first highlight, detector time per frame, capture to card,
   spoken command to UI update.

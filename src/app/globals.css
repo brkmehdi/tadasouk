@@ -107,3 +107,38 @@ body {
     background: transparent;
   }
 }
+
+/* Shutter: a quick white flash over the video. */
+.shutter-flash {
+  animation: shutter-flash 220ms ease-out both;
+}
+@keyframes shutter-flash {
+  from {
+    opacity: 0.75;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* A new card appears as the flying shot lands in it. */
+.card-pop {
+  animation: card-pop 260ms 420ms cubic-bezier(0.2, 0.8, 0.2, 1.2) both;
+}
+@keyframes card-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shutter-flash,
+  .card-pop {
+    animation: none;
+  }
+}

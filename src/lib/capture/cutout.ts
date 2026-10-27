@@ -7,10 +7,11 @@ import { signature, type Signature } from "./similarity";
 
 const MAX_SIDE = 1024;
 
-export type Keyframe = { canvas: HTMLCanvasElement; box: Box; at: number };
+// `point` (a tap) marks the product inside `box`; `box` also frames the instant crop.
+export type Keyframe = { canvas: HTMLCanvasElement; box: Box; point?: { x: number; y: number }; at: number };
 
 // Copies the current video frame (downscaled) and maps the detector box onto it.
-export function grabKeyframe(video: HTMLVideoElement, box: Box): Keyframe {
+export function grabKeyframe(video: HTMLVideoElement, box: Box, point?: { x: number; y: number }): Keyframe {
   const scale = Math.min(1, MAX_SIDE / Math.max(video.videoWidth, video.videoHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(video.videoWidth * scale);
@@ -19,6 +20,7 @@ export function grabKeyframe(video: HTMLVideoElement, box: Box): Keyframe {
   return {
     canvas,
     box: { x: box.x * scale, y: box.y * scale, w: box.w * scale, h: box.h * scale },
+    point: point && { x: point.x * scale, y: point.y * scale },
     at: performance.now(),
   };
 }
@@ -37,7 +39,9 @@ export function ghostCrop(k: Keyframe): string {
   return c.toDataURL("image/jpeg", 0.7);
 }
 
-export type Cutout = { url: string; blob: Blob; color: string | null; samMs: number; sig: Signature };
+// `url`: the product on white with a soft shadow (what the shop shows by default).
+// `cutoutUrl`: the transparent cutout itself, kept for studio photos.
+export type Cutout = { url: string; cutoutUrl: string; color: string | null; samMs: number; sig: Signature };
 
 export class SegmentError extends Error {
   constructor(
@@ -48,8 +52,40 @@ export class SegmentError extends Error {
   }
 }
 
+type Rect = { left: number; top: number; right: number; bottom: number };
+
+// Tap candidates: the point alone (good for a small product), then square boxes around it
+// of growing size. A point alone may return just the label; a box too big returns the wall.
+function tapCandidates(k: Keyframe): (Rect | null)[] {
+  const { x, y } = k.point!;
+  const side = Math.min(k.canvas.width, k.canvas.height);
+  return [
+    null,
+    ...[0.25, 0.35, 0.55, 0.8].map((f) => {
+      const h = (side * f) / 2;
+      return {
+        left: Math.max(0, x - h),
+        top: Math.max(0, y - h),
+        right: Math.min(k.canvas.width, x + h),
+        bottom: Math.min(k.canvas.height, y + h),
+      };
+    }),
+  ];
+}
+
+// SAM rates each mask (include_confidence). Keep the most confident; when two are close,
+// the smaller one, which carries less wall or table. Tested on a label tap: the point alone
+// gave the label (0.62), the small box the whole bottle (0.95), the big box the wall.
+function pickTapMask<M extends { bounds: Rect; confidence?: number }>(masks: readonly M[]) {
+  const area = (m: M) => (m.bounds.right - m.bounds.left) * (m.bounds.bottom - m.bounds.top);
+  const top = Math.max(...masks.map((m) => m.confidence ?? 0));
+  const close = masks.filter((m) => (m.confidence ?? 0) >= top - 0.03);
+  return close.sort((x, y) => area(x) - area(y))[0] ?? null;
+}
+
 export async function segment(sessionId: string, k: Keyframe): Promise<Cutout | null> {
   const started = performance.now();
+  const candidates = k.point ? tapCandidates(k) : undefined;
   const res = await fetch("/api/segment", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -59,6 +95,8 @@ export async function segment(sessionId: string, k: Keyframe): Promise<Cutout | 
       width: k.canvas.width,
       height: k.canvas.height,
       box: { left: k.box.x, top: k.box.y, right: k.box.x + k.box.w, bottom: k.box.y + k.box.h },
+      point: k.point,
+      candidates,
     }),
   });
   if (!res.ok || !res.body) {
@@ -67,10 +105,36 @@ export async function segment(sessionId: string, k: Keyframe): Promise<Cutout | 
   }
   const result = await parseImageStream(sseEvents(res.body)).finalResult;
   const samMs = performance.now() - started;
-  const mask = recordsOfKind(result.records, "mask")[0];
+  const masks = recordsOfKind(result.records, "mask");
+  const mask = candidates ? pickTapMask(masks) : masks[0];
   if (!mask) return null;
-  const raster = decodeMaskToRaster(mask.mask);
-  return composite(k, raster, mask.mask.width, mask.mask.height, mask.bounds, samMs);
+  if (!candidates) {
+    return composite(k, decodeMaskToRaster(mask.mask), mask.mask.width, mask.mask.height, mask.bounds, samMs);
+  }
+  // In one request SAM gives each pixel to a single object, so the smaller guesses (the label
+  // under the finger) are cut out of the chosen one. Put back every mask lying inside it.
+  const b = mask.bounds;
+  const bw = b.right - b.left;
+  const bh = b.bottom - b.top;
+  const merged = new Uint8Array(bw * bh);
+  const inside = (o: Rect) => o.left >= b.left - 4 && o.top >= b.top - 4 && o.right <= b.right + 4 && o.bottom <= b.bottom + 4;
+  for (const m of masks) {
+    if (m !== mask && !inside(m.bounds)) continue;
+    const r = decodeMaskToRaster(m.mask);
+    const mw = m.bounds.right - m.bounds.left;
+    const mh = m.bounds.bottom - m.bounds.top;
+    for (let y = 0; y < mh; y++) {
+      const ty = m.bounds.top + y - b.top;
+      if (ty < 0 || ty >= bh) continue;
+      const ry = Math.min(m.mask.height - 1, Math.floor((y * m.mask.height) / mh));
+      for (let x = 0; x < mw; x++) {
+        const tx = m.bounds.left + x - b.left;
+        if (tx < 0 || tx >= bw) continue;
+        if (r[ry * m.mask.width + Math.min(m.mask.width - 1, Math.floor((x * m.mask.width) / mw))]) merged[ty * bw + tx] = 1;
+      }
+    }
+  }
+  return composite(k, merged, bw, bh, b, samMs);
 }
 
 export async function* sseEvents(body: ReadableStream<Uint8Array>) {
@@ -133,16 +197,52 @@ async function composite(
   }
   ctx.putImageData(img, 0, 0);
   const sig = signature(out, { x: 0, y: 0, w: bw, h: bh }, true);
-  const blob = await new Promise<Blob>((resolve, reject) =>
-    out.toBlob((bl) => (bl ? resolve(bl) : reject(new Error("toBlob failed"))), "image/png"),
-  );
+  const [png, white] = await Promise.all([toBlob(out, "image/png"), toBlob(onWhite(out), "image/jpeg", 0.9)]);
   return {
-    url: URL.createObjectURL(blob),
-    blob,
+    url: URL.createObjectURL(white),
+    cutoutUrl: URL.createObjectURL(png),
     color: n ? colorName(r / n, g / n, b / n) : null,
     samMs,
     sig,
   };
+}
+
+function toBlob(c: HTMLCanvasElement, type: string, quality?: number) {
+  return new Promise<Blob>((resolve, reject) =>
+    c.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), type, quality),
+  );
+}
+
+// Square white canvas, product centered a little high, soft contact shadow under it.
+export function onWhite(cut: HTMLCanvasElement | HTMLImageElement, side = 1024) {
+  const cw = cut.width;
+  const ch = cut.height;
+  const c = document.createElement("canvas");
+  c.width = side;
+  c.height = side;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, side, side);
+  const scale = Math.min((side * 0.78) / cw, (side * 0.78) / ch);
+  const w = cw * scale;
+  const h = ch * scale;
+  const x = (side - w) / 2;
+  const y = (side - h) / 2 - side * 0.03;
+  // Shadow: a flat blurred ellipse where the product touches the ground.
+  const sy = y + h;
+  const g = ctx.createRadialGradient(side / 2, sy, 0, side / 2, sy, w * 0.55);
+  g.addColorStop(0, "rgba(0,0,0,0.22)");
+  g.addColorStop(0.55, "rgba(0,0,0,0.08)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.save();
+  ctx.translate(side / 2, sy);
+  ctx.scale(1, 0.12);
+  ctx.translate(-side / 2, -sy);
+  ctx.fillStyle = g;
+  ctx.fillRect(side / 2 - w * 0.6, sy - w * 0.6, w * 1.2, w * 1.2);
+  ctx.restore();
+  ctx.drawImage(cut, x, y, w, h);
+  return c;
 }
 
 // Coarse color word for references like "the red one".

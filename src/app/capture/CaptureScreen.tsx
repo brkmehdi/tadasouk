@@ -6,7 +6,8 @@ import { ghostCrop, grabKeyframe, segment, SegmentError, type Keyframe } from "@
 import { createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
 import { emptyMetrics, report, type Metrics } from "@/lib/capture/metrics";
 import { innerRegion, signature, similarity, type Signature } from "@/lib/capture/similarity";
-import { betterPhotos, checkPrice } from "@/lib/capture/product-actions";
+import { betterPhotos, checkPrice, identify, studioPhoto } from "@/lib/capture/product-actions";
+import { shutter } from "@/lib/capture/sfx";
 import {
   addCaptured,
   addImage,
@@ -17,17 +18,20 @@ import {
   editProduct,
   initialSession,
   makeCover,
+  nextQuestion,
   patchImage,
   patchProduct,
   purgeRemoved,
   removeProduct,
   type Effect,
+  type ProductImage,
+  type Question,
   type SessionState,
   type ToolCall,
 } from "@/lib/capture/session";
 import { explainMediaError, openCamera, type MediaHelp } from "@/lib/capture/media";
 import { startVoice } from "@/lib/capture/voice";
-import ProductCard, { formatPrice } from "./ProductCard";
+import ProductCard from "./ProductCard";
 import ProductSheet from "./ProductSheet";
 
 type Phase = "idle" | "starting" | "recording" | "stopped";
@@ -62,6 +66,8 @@ export default function CaptureScreen() {
   const lastDetectRef = useRef(0);
   const attachIdRef = useRef<string | null>(null);
   const sigsRef = useRef(new Map<string, { crops: Signature[]; cutouts: Signature[] }>());
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const identifyingRef = useRef(new Map<string, Promise<void>>());
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [session, setSessionState] = useState<SessionState>(initialSession);
@@ -75,6 +81,9 @@ export default function CaptureScreen() {
   const [open, setOpen] = useState<{ id: string; from: DOMRect } | null>(null);
   const [flash, setFlash] = useState<{ id: string; n: number } | null>(null);
   const [help, setHelp] = useState<MediaHelp | null>(null);
+  const [shots, setShots] = useState<Shot[]>([]);
+  const [shutterN, setShutterN] = useState(0);
+  const [dismissed, setDismissed] = useState<string[]>([]);
 
   const setSession = useCallback((next: SessionState) => {
     sessionRef.current = next;
@@ -97,6 +106,98 @@ export default function CaptureScreen() {
     attachIdRef.current = id;
     setAttachIdState(id);
   }, []);
+
+  // ---------- slow product actions: AI photos, price check ----------
+  const runEffect = useCallback(
+    (effect: Effect): Promise<void> | void => {
+      const sid = sessionIdRef.current || crypto.randomUUID();
+      const product = sessionRef.current.products.find((p) => p.id === effect.productId);
+      if (!product) return;
+      if (effect.kind === "better_photos") {
+        if (product.photos === "loading") return;
+        setSession(patchProduct(sessionRef.current, product.id, { photos: "loading" }));
+        return betterPhotos(sid, product, (url) =>
+          setSession(addImage(sessionRef.current, product.id, { id: crypto.randomUUID(), url, source: "ai", pending: false })),
+        )
+          .then(() => setSession(patchProduct(sessionRef.current, product.id, { photos: "idle" })))
+          .catch((err: unknown) => {
+            setSession(patchProduct(sessionRef.current, product.id, { photos: "error" }));
+            caption(err instanceof Error ? err.message : String(err), "error");
+          });
+      } else {
+        if (product.priceCheck?.status === "loading") return;
+        setSession(patchProduct(sessionRef.current, product.id, { priceCheck: { status: "loading" } }));
+        return checkPrice(sid, product).then((check) => {
+          setSession(patchProduct(sessionRef.current, product.id, { priceCheck: check }));
+          if (check.status === "error") caption(check.message, "error");
+        });
+      }
+    },
+    [caption, setSession],
+  );
+
+
+  // ---------- naming and research ----------
+  // Right after the cutout: name the product from its photo (only fills what the merchant
+  // has not set).
+  const runIdentify = useCallback(
+    (id: string) => {
+      const product = sessionRef.current.products.find((p) => p.id === id);
+      if (!product || product.identify !== "idle") return;
+      setSession(patchProduct(sessionRef.current, id, { identify: "loading" }));
+      const job = identify(sessionIdRef.current, product)
+        .then((who) => {
+          const now = sessionRef.current.products.find((p) => p.id === id);
+          if (!now) return;
+          const patch: Partial<typeof now> = { identify: who ? "done" : "failed" };
+          if (who) {
+            // The name is a draft the merchant can change; the description only when sure.
+            if (!now.name && who.name_fr) patch.name = who.name_fr;
+            if (!now.description && who.confident) patch.description = who.description_fr;
+            patch.nameAr = who.name_ar || null;
+            patch.category = who.category || null;
+          }
+          setSession(patchProduct(sessionRef.current, id, patch));
+        })
+        .catch(() => setSession(patchProduct(sessionRef.current, id, { identify: "failed" })))
+        .finally(() => identifyingRef.current.delete(id));
+      identifyingRef.current.set(id, job);
+    },
+    [setSession],
+  );
+
+  const runStudio = useCallback(
+    (productId: string, image: ProductImage) => {
+      if (!image.cutoutUrl) return Promise.resolve();
+      return studioPhoto(sessionIdRef.current, image.cutoutUrl)
+        .then(({ url }) =>
+          setSession(addImage(sessionRef.current, productId, { id: crypto.randomUUID(), url, source: "studio", pending: false })),
+        )
+        .catch(() => {
+          // The plain white photo stays; nothing to tell the merchant.
+        });
+    },
+    [setSession],
+  );
+
+  // Once the merchant moves on (next product, or stop): studio photos of the real pictures,
+  // photos guided by the web, and prices in Morocco, all in the background.
+  const finishProduct = useCallback(
+    async (id: string) => {
+      const product = sessionRef.current.products.find((p) => p.id === id);
+      if (!product || product.research !== "idle" || product.status !== "active") return;
+      setSession(patchProduct(sessionRef.current, id, { research: "running" }));
+      await identifyingRef.current.get(id);
+      const camera = product.images.filter((i) => i.source === "camera" && i.cutoutUrl).slice(0, 2);
+      await Promise.allSettled([
+        ...camera.map((img) => runStudio(id, img)),
+        runEffect({ kind: "better_photos", productId: id }),
+        runEffect({ kind: "check_price", productId: id }),
+      ]);
+      setSession(patchProduct(sessionRef.current, id, { research: "done" }));
+    },
+    [runEffect, runStudio, setSession],
+  );
 
   // ---------- capture: keyframe -> instant card -> SAM cutout ----------
   // Showing a product that is already in the tray selects its card instead of adding a copy.
@@ -153,7 +254,14 @@ export default function CaptureScreen() {
       const imageId = crypto.randomUUID();
       const ghostUrl = ghostCrop(k);
       const id = attachTo?.id ?? crypto.randomUUID();
+      const previous = sessionRef.current.currentId;
       sigsOf(id).crops.push(crop);
+      // Shutter: flash, click, and the shot flies from where it was taken into its card.
+      shutter(audioCtxRef.current);
+      setShutterN((n) => n + 1);
+      const from = videoRef.current ? screenRect(videoRef.current, k) : null;
+      if (from) setShots((list) => [...list, { id: imageId, url: ghostUrl, from, productId: id }]);
+      if (!attachTo && previous && previous !== id) void finishProduct(previous);
       setSession(
         attachTo
           ? addImage(sessionRef.current, id, { id: imageId, url: ghostUrl, source: "camera", pending: true })
@@ -176,10 +284,19 @@ export default function CaptureScreen() {
             }
           }
           if (cut) sigsOf(id).cutouts.push(cut.sig);
-          let next = patchImage(sessionRef.current, id, imageId, cut ? { url: cut.url, pending: false } : { pending: false });
+          let next = patchImage(
+            sessionRef.current,
+            id,
+            imageId,
+            cut ? { url: cut.url, cutoutUrl: cut.cutoutUrl, pending: false } : { pending: false },
+          );
           const product = next.products.find((p) => p.id === id);
           if (cut && product && !product.color) next = patchProduct(next, id, { color: cut.color });
           setSession(next);
+          if (cut && !attachTo) runIdentify(id);
+          // A photo added to an already researched product gets its studio version too.
+          const img = next.products.find((p) => p.id === id)?.images.find((i) => i.id === imageId);
+          if (cut && attachTo && attachTo.research === "done" && img) void runStudio(id, img);
           if (cut) metricsRef.current.capture.push({ at: Date.now(), ms, parts: { sam: cut.samMs } });
           refreshMetrics();
         })
@@ -189,45 +306,7 @@ export default function CaptureScreen() {
         });
       return id;
     },
-    [bestMatch, caption, refreshMetrics, selectExisting, setSession],
-  );
-
-  // ---------- slow product actions: AI photos, price check ----------
-  const runEffect = useCallback(
-    (effect: Effect) => {
-      const sid = sessionIdRef.current || crypto.randomUUID();
-      const product = sessionRef.current.products.find((p) => p.id === effect.productId);
-      if (!product) return;
-      if (effect.kind === "better_photos") {
-        if (product.photos === "loading") return;
-        setSession(patchProduct(sessionRef.current, product.id, { photos: "loading" }));
-        betterPhotos(sid, product, (url) =>
-          setSession(addImage(sessionRef.current, product.id, { id: crypto.randomUUID(), url, source: "ai", pending: false })),
-        )
-          .then(() => setSession(patchProduct(sessionRef.current, product.id, { photos: "idle" })))
-          .catch((err: unknown) => {
-            setSession(patchProduct(sessionRef.current, product.id, { photos: "error" }));
-            caption(err instanceof Error ? err.message : String(err), "error");
-          });
-      } else {
-        if (product.priceCheck?.status === "loading") return;
-        setSession(patchProduct(sessionRef.current, product.id, { priceCheck: { status: "loading" } }));
-        caption(`Je cherche le prix de « ${displayName(product)} » au Maroc…`, "pending");
-        checkPrice(sid, product).then((check) => {
-          setSession(patchProduct(sessionRef.current, product.id, { priceCheck: check }));
-          if (check.status === "done" && check.low != null && check.high != null) {
-            const avg = check.average != null ? `, moyenne ${formatPrice(check.average, check.currency)}` : "";
-            caption(
-              `${displayName(product)} : ${formatPrice(check.low, check.currency)} à ${formatPrice(check.high, check.currency)}${avg}`,
-              "heard",
-            );
-          } else if (check.status === "error") {
-            caption(check.message, "error");
-          }
-        });
-      }
-    },
-    [caption, setSession],
+    [bestMatch, caption, finishProduct, refreshMetrics, runIdentify, runStudio, selectExisting, setSession],
   );
 
   const centerBox = (v: HTMLVideoElement): Box => {
@@ -333,6 +412,7 @@ export default function CaptureScreen() {
   const start = useCallback(async () => {
     // Created inside the tap, before any await: iOS keeps audio started later silent.
     const audioCtx = new AudioContext();
+    audioCtxRef.current = audioCtx;
     setPhase("starting");
     setHelp(null);
     setUpload(null);
@@ -342,6 +422,7 @@ export default function CaptureScreen() {
     setSession(initialSession(sessionRef.current.currency));
     setAttach(null);
     setOpen(null);
+    setDismissed([]);
     sigsRef.current.clear();
     setCaptions([]);
 
@@ -423,8 +504,9 @@ export default function CaptureScreen() {
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
     setLevel({ rms: 0, speaking: false });
     setPhase("stopped");
-    setShowMetrics(true);
-  }, []);
+    audioCtxRef.current = null;
+    for (const p of sessionRef.current.products) void finishProduct(p.id);
+  }, [finishProduct]);
 
   useEffect(
     () => () => {
@@ -445,7 +527,7 @@ export default function CaptureScreen() {
     const vy = (e.clientY - rect.top - (rect.height - v.videoHeight * scale) / 2) / scale;
     const t = targetRef.current;
     const inside = t && vx >= t.box.x && vx <= t.box.x + t.box.w && vy >= t.box.y && vy <= t.box.y + t.box.h;
-    const s = Math.min(v.videoWidth, v.videoHeight) * 0.4;
+    const s = Math.min(v.videoWidth, v.videoHeight) * 0.75;
     const box: Box = inside
       ? t.box
       : {
@@ -455,7 +537,7 @@ export default function CaptureScreen() {
           h: s,
         };
     triggerRef.current.markManualCapture(box, performance.now());
-    capture(grabKeyframe(v, box), inside ? t.label : null, "tap");
+    capture(grabKeyframe(v, box, inside ? undefined : { x: vx, y: vy }), inside ? t.label : null, "tap");
   };
 
   const products = [...session.products].sort((a, b) => b.order - a.order);
@@ -473,6 +555,26 @@ export default function CaptureScreen() {
     setOpen({ id, from });
   };
   const onAttach = (id: string) => setAttach(attachIdRef.current === id ? null : id);
+
+  // One question at a time: about the current product while filming (when the merchant is
+  // quiet), then about each unfinished product once recording stops.
+  const keyOf = (q: Question) => `${q.productId}:${q.text}`;
+  const candidates =
+    phase === "recording"
+      ? [session.products.find((p) => p.id === session.currentId)]
+      : phase === "stopped"
+        ? [...session.products].sort((a, b) => a.order - b.order)
+        : [];
+  const question =
+    level.speaking || open
+      ? null
+      : (candidates
+          .map((p) => (p ? nextQuestion(p) : null))
+          .find((q): q is Question => !!q && !dismissed.includes(keyOf(q))) ?? null);
+  const openFromCard = (id: string) => {
+    const el = document.querySelector(`[data-card="${id}"]`);
+    if (el) onOpen(id, el.getBoundingClientRect());
+  };
 
   return (
     <main className="fixed inset-0 overflow-hidden bg-black text-white select-none">
@@ -582,19 +684,51 @@ export default function CaptureScreen() {
         <MetricsPanel m={metricsView} upload={upload} onClose={() => setShowMetrics(false)} />
       )}
 
-      {/* captions */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-36 flex flex-col items-center gap-1 px-4 pe-[32vw]">
-        {captions.map((c) => (
+      {/* shutter: white flash, then each shot flies into its card */}
+      {shutterN > 0 && <div key={shutterN} className="shutter-flash pointer-events-none absolute inset-0 bg-white" />}
+      {shots.map((shot) => (
+        <FlyingShot key={shot.id} shot={shot} onDone={() => setShots((l) => l.filter((x) => x.id !== shot.id))} />
+      ))}
+
+      {/* text band: its own strip above the record button, left of the tray, never over the cards */}
+      <div className="pointer-events-none absolute start-3 end-[calc(min(30vw,9rem)+0.75rem)] bottom-32 flex flex-col items-start gap-1.5">
+        {question && (
+          <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded-2xl bg-amber-300 py-1 ps-3 pe-1 text-black shadow-lg">
+            <button type="button" onClick={() => openFromCard(question.productId)} className="min-w-0 py-1 text-start">
+              <p dir="auto" className="line-clamp-2 text-[13px] leading-snug font-medium">
+                {question.text}
+              </p>
+            </button>
+            {question.action && (
+              <button
+                type="button"
+                onClick={() => setSession(editProduct(sessionRef.current, question.productId, question.action!.patch))}
+                className="shrink-0 rounded-xl bg-black px-2.5 py-1.5 text-xs font-semibold text-white active:scale-95"
+              >
+                {question.action.label}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setDismissed((d) => [...d, keyOf(question)])}
+              aria-label="Plus tard"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm text-black/60"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+        {captions.slice(-2).map((c) => (
           <p
             key={c.id}
             dir="auto"
-            className={`max-w-full rounded-xl px-3 py-1.5 text-center text-base leading-snug backdrop-blur ${
+            className={`line-clamp-2 max-w-full rounded-xl px-2.5 py-1 text-[13px] leading-snug backdrop-blur ${
               c.kind === "error"
-                ? "bg-red-600/80"
+                ? "bg-red-600/85"
                 : c.kind === "question"
-                  ? "bg-amber-400/90 font-semibold text-black"
+                  ? "bg-amber-300/95 font-medium text-black"
                   : c.kind === "pending"
-                    ? "bg-black/40 text-neutral-300"
+                    ? "bg-black/45 text-neutral-300"
                     : "bg-black/60"
             }`}
           >
@@ -620,6 +754,62 @@ export default function CaptureScreen() {
         </button>
       </div>
     </main>
+  );
+}
+
+type Shot = { id: string; url: string; from: { left: number; top: number; width: number; height: number }; productId: string };
+
+// Where a keyframe's box sits on screen (the video is drawn with object-fit: cover).
+function screenRect(video: HTMLVideoElement, k: Keyframe) {
+  const r = video.getBoundingClientRect();
+  const toVideo = video.videoWidth / k.canvas.width;
+  const scale = Math.max(r.width / video.videoWidth, r.height / video.videoHeight);
+  const ox = r.left + (r.width - video.videoWidth * scale) / 2;
+  const oy = r.top + (r.height - video.videoHeight * scale) / 2;
+  return {
+    left: ox + k.box.x * toVideo * scale,
+    top: oy + k.box.y * toVideo * scale,
+    width: k.box.w * toVideo * scale,
+    height: k.box.h * toVideo * scale,
+  };
+}
+
+// The captured photo pops up where it was taken, zooms a little, then flies into its card.
+function FlyingShot({ shot, onDone }: { shot: Shot; onDone: () => void }) {
+  const ref = useRef<HTMLImageElement>(null);
+  // The screen re-renders many times a second (mic level); the animation must not restart.
+  const done = useRef(onDone);
+  useEffect(() => {
+    done.current = onDone;
+  });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const target = document.querySelector(`[data-card="${shot.productId}"]`)?.getBoundingClientRect();
+    const { left, top, width, height } = shot.from;
+    const to = target
+      ? `translate(${target.left + target.width / 2 - (left + width / 2)}px, ${target.top + target.width / 2 - (top + height / 2)}px) scale(${(target.width * 0.8) / Math.max(width, height)})`
+      : "scale(0.2)";
+    const a = el.animate(
+      [
+        { transform: "scale(1)", opacity: 1, offset: 0 },
+        { transform: "scale(1.12)", opacity: 1, offset: 0.3 },
+        { transform: to, opacity: 0.85, offset: 1 },
+      ],
+      { duration: 650, easing: "cubic-bezier(0.5, 0, 0.2, 1)", fill: "forwards" },
+    );
+    a.onfinish = () => done.current();
+    return () => a.cancel();
+  }, [shot]);
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      ref={ref}
+      src={shot.url}
+      alt=""
+      className="pointer-events-none fixed z-30 rounded-xl object-cover shadow-2xl ring-2 ring-white"
+      style={{ left: shot.from.left, top: shot.from.top, width: shot.from.width, height: shot.from.height }}
+    />
   );
 }
 
