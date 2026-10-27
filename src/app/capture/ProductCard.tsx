@@ -60,7 +60,7 @@ export default function ProductCard({ p, current, flash, onOpen, onRemove }: Pro
         </div>
 
         <p dir="auto" className="mt-1.5 h-3.5 truncate px-0.5 text-[11px] leading-[14px] font-medium text-white">
-          {p.name || p.suggested.name ? (
+          {p.name ? (
             displayName(p)
           ) : busy ? (
             <span className="shimmer inline-block h-2.5 w-14 rounded" />

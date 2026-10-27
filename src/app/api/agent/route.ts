@@ -9,7 +9,6 @@ import { chatCost, PRICES, reserve, settle } from "@/lib/server/usage";
 export type AgentProduct = {
   id: string;
   name: string | null;
-  suggestedName: string | null;
   label: string | null;
   color: string | null;
   price: number | null;
@@ -99,7 +98,7 @@ const TOOLS = [
   ),
   fn(
     "accept_suggestions",
-    "The merchant accepts what the app proposes for a product: suggested name, description and price ('utilise tout', 'mzyan', 'use all').",
+    "The merchant accepts the suggested price of a product ('utilise le prix conseillé', 'mzyan', 'ok').",
     { product_id: ref },
     ["product_id"],
   ),

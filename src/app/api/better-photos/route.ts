@@ -14,7 +14,7 @@ type Body = {
   color?: string | null;
 };
 
-const COUNT = 2;
+const COUNT = 1; // one AI photo; real web photos come from /api/web-photos
 
 export async function POST(req: Request) {
   let body: Body;

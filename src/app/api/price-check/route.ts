@@ -85,6 +85,7 @@ export async function POST(req: Request) {
     `Search current retail prices for this product in Morocco (supermarkets, online shops, marketplaces).`,
     `Return the lowest, average and highest price you found in ${currency}, and a suggested selling price that is competitive for a small local shop (round number).`,
     `Add a verdict on the merchant price (unknown if none), a short note, and up to 5 sources with their prices.`,
+    `Sources must be pages of this exact product in a shop (not a store home page, a category or a search page).`,
     `If you cannot find this exact product, use the closest comparable products and say so in the note.`,
     `Also give its shop title in French and Arabic, a two-sentence French description based on what you found, and a category.`,
     `Write the note in French.`,

@@ -2,18 +2,11 @@
 
 // Tap a card: it grows into this sheet over the lower part of the video. Recording keeps
 // running, and voice commands apply to the open product. Close: it shrinks back to its card.
-// The AI's proposals (name, description, price) wait under each field; "Tout utiliser"
-// takes them all at once.
+// The AI fills name and description on its own (the merchant edits what they do not like);
+// the suggested price waits for one tap.
 
 import { useLayoutEffect, useRef, useState } from "react";
-import {
-  cover,
-  displayName,
-  hasSuggestions,
-  pendingSuggestions,
-  type PriceCheck,
-  type Product,
-} from "@/lib/capture/session";
+import { cover, displayName, suggestedPrice, type PriceCheck, type Product } from "@/lib/capture/session";
 import { formatPrice } from "./ProductCard";
 
 type Props = {
@@ -22,7 +15,6 @@ type Props = {
   attaching: boolean;
   onClose: () => void;
   onEdit: (patch: Partial<Product>) => void;
-  onUseAll: () => void;
   onRemoveImage: (imageId: string) => void;
   onCover: (imageId: string) => void;
   onAttach: () => void;
@@ -41,7 +33,7 @@ function flipFrom(el: HTMLElement, from: DOMRect) {
 export default function ProductSheet(props: Props) {
   const { p, from, attaching, onClose, onEdit } = props;
   const sheetRef = useRef<HTMLDivElement>(null);
-  const pending = pendingSuggestions(p);
+  const suggested = p.price == null ? suggestedPrice(p) : null;
   const researching = p.research === "running" || p.identify === "loading";
   const img = cover(p);
 
@@ -106,30 +98,6 @@ export default function ProductSheet(props: Props) {
       </div>
 
       <div className="overflow-y-auto px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        {/* proposals */}
-        {(hasSuggestions(p) || researching) && (
-          <div className="ui-card mb-4 flex items-center gap-3 p-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">{hasSuggestions(p) ? "Propositions prêtes" : "Recherche du produit…"}</p>
-              <p className="text-[13px] leading-snug text-ink-3">
-                {hasSuggestions(p)
-                  ? [pending.name && "nom", pending.price != null && "prix", pending.description && "description"]
-                      .filter(Boolean)
-                      .join(", ")
-                      .replace(/^./, (c) => c.toUpperCase()) + " trouvés pour ce produit."
-                  : "Nom, photos et prix au Maroc."}
-              </p>
-            </div>
-            {hasSuggestions(p) ? (
-              <button type="button" onClick={props.onUseAll} className="ui-btn ui-btn-primary h-9 shrink-0">
-                Tout utiliser
-              </button>
-            ) : (
-              <span className="ui-skel h-9 w-24 shrink-0 animate-pulse" />
-            )}
-          </div>
-        )}
-
         {/* photos */}
         <div className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1">
           {p.images.map((im, i) => (
@@ -147,7 +115,9 @@ export default function ProductSheet(props: Props) {
                 {im.pending && <span className="shimmer absolute inset-0" />}
               </button>
               {im.source !== "camera" && (
-                <span className="ui-badge absolute start-1 bottom-1">{im.source === "studio" ? "Studio" : "Web"}</span>
+                <span className="ui-badge absolute start-1 bottom-1 max-w-[76px] truncate">
+                  {im.source === "studio" ? "Studio" : im.source === "ai" ? "IA" : (im.credit ?? "Web")}
+                </span>
               )}
               <button
                 type="button"
@@ -188,7 +158,6 @@ export default function ProductSheet(props: Props) {
             onBlur={(e) => e.target.value.trim() !== (p.name ?? "") && onEdit({ name: e.target.value.trim() || null })}
             className="ui-input"
           />
-          {pending.name && <Proposal text={pending.name} onUse={() => onEdit({ name: pending.name })} />}
         </div>
 
         {/* price and stock */}
@@ -227,10 +196,10 @@ export default function ProductSheet(props: Props) {
             Avant remise : <span className="line-through tabular-nums">{formatPrice(p.compareAtPrice, p.currency)}</span>
           </p>
         )}
-        {pending.price != null && (
+        {suggested != null && (
           <Proposal
-            text={`Conseillé : ${formatPrice(pending.price, p.currency)}`}
-            onUse={() => onEdit({ price: pending.price, compareAtPrice: null })}
+            text={`Conseillé : ${formatPrice(suggested, p.currency)}`}
+            onUse={() => onEdit({ price: suggested, compareAtPrice: null })}
           />
         )}
         {p.priceCheck && <PriceDetails check={p.priceCheck} price={p.price} currency={p.currency} />}
@@ -252,7 +221,6 @@ export default function ProductSheet(props: Props) {
             }
             className="ui-input h-auto resize-none py-2.5 leading-snug"
           />
-          {pending.description && <Proposal text={pending.description} onUse={() => onEdit({ description: pending.description })} />}
         </div>
 
         {/* actions */}
@@ -286,7 +254,7 @@ export default function ProductSheet(props: Props) {
   );
 }
 
-// A value the AI proposes for a field, with a one-tap "Utiliser".
+// The suggested price under the empty price field, with a one-tap "Utiliser".
 function Proposal({ text, onUse }: { text: string; onUse: () => void }) {
   return (
     <div className="mt-1.5 flex items-start gap-2 text-[13px] leading-snug">

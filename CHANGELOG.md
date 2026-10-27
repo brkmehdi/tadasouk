@@ -71,6 +71,16 @@ Phase 0, live capture spike.
   fields, one blue main button; the frosted product cards stay.
 - Studio photo fidelity check allows small shifts and pastes the real product where the model
   drew it.
+- AI results now fill name and description directly (no "Tout utiliser"); the merchant edits
+  what they do not like, and a field they edited is never overwritten. The price stays empty
+  with a one-tap "Utiliser" on the suggested price.
+- Hold to frame: hold a finger on the video for 1 s (a ring fills), a dashed frame appears,
+  resizable while still holding; after lifting it moves and resizes by its corners, and a tap
+  outside it takes the photo of what is inside. The frame snaps to the product the AI finds
+  under the finger until the merchant touches it. A quick tap no longer captures.
+- Photo research per product: 1 AI photo (badge IA) plus real photos from the shop pages the
+  price research found (`/api/web-photos` reads their product image; badge shows the site).
+- The product tray no longer blocks touches on the right side of the video.
 - Live preview on Cloudflare Workers. Cache Components turned off: it hangs in the Workers runtime.
 - Latency panel on the record screen: first highlight, detector time per frame, capture to card,
   spoken command to UI update.

@@ -333,3 +333,25 @@ body {
     animation: none;
   }
 }
+
+/* Hold to frame: the ring fills while the finger rests on the video. */
+.hold-ring {
+  transform: rotate(-90deg);
+  transform-origin: 32px 32px;
+  stroke-dasharray: 163.4;
+  stroke-dashoffset: 163.4;
+  animation: hold-ring linear forwards;
+}
+@keyframes hold-ring {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+/* The frame glides onto the product the AI found. */
+.frame-box {
+  transition:
+    left 0.25s ease,
+    top 0.25s ease,
+    width 0.25s ease,
+    height 0.25s ease;
+}

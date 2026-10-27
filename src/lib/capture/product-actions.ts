@@ -1,7 +1,7 @@
 // Browser side of the slow product actions: naming, studio photo, web photos, price check.
 
 import { onWhite, sseEvents } from "./cutout";
-import { cover, type PriceCheck, type Product } from "./session";
+import { type PriceCheck, type Product } from "./session";
 
 async function loadImage(url: string) {
   const img = new Image();
@@ -45,8 +45,14 @@ async function* streamedImages(res: Response) {
 
 export type Identity = { name_fr: string; name_ar: string; category: string; description_fr: string; confident: boolean };
 
+// The merchant's own photo. Photos from other sites cannot be drawn to a canvas and read
+// back (cross-origin), so every upload to the API starts from the camera photo.
+function ownPhoto(p: Product) {
+  return p.images.find((i) => i.source === "camera" && !i.pending) ?? p.images.find((i) => i.source !== "web") ?? null;
+}
+
 export async function identify(sessionId: string, p: Product): Promise<Identity | null> {
-  const src = cover(p);
+  const src = ownPhoto(p);
   if (!src) return null;
   const res = await post("/api/identify", { sessionId, image: await toJpeg(src.url, 512), label: p.label });
   if (!res.ok) return null;
@@ -55,7 +61,7 @@ export async function identify(sessionId: string, p: Product): Promise<Identity 
 
 // Photos guided by web references of the product (muse-image's built-in search).
 export async function betterPhotos(sessionId: string, p: Product, onPhoto: (url: string) => void) {
-  const src = p.images.find((i) => i.source === "camera" && !i.pending) ?? cover(p);
+  const src = ownPhoto(p);
   if (!src) throw new Error("Pas encore de photo");
   const res = await post("/api/better-photos", {
     sessionId,
@@ -152,7 +158,7 @@ function bestAlignment(generated: Uint8ClampedArray, cutout: Uint8ClampedArray, 
 }
 
 export async function checkPrice(sessionId: string, p: Product): Promise<PriceCheck> {
-  const src = cover(p);
+  const src = ownPhoto(p);
   const res = await post("/api/price-check", {
     sessionId,
     image: src && !src.pending ? await toJpeg(src.url, 512) : undefined,
@@ -165,4 +171,14 @@ export async function checkPrice(sessionId: string, p: Product): Promise<PriceCh
   if (!res.ok) return { status: "error", message: await errorMessage(res, "Vérification impossible") };
   const { result } = (await res.json()) as { result: Omit<Extract<PriceCheck, { status: "done" }>, "status"> };
   return { status: "done", ...result };
+}
+
+export type WebPhoto = { image: string; page: string; site: string };
+
+// Real product photos taken from the shop pages the price research found.
+export async function webPhotos(sessionId: string, urls: string[]): Promise<WebPhoto[]> {
+  if (!urls.length) return [];
+  const res = await post("/api/web-photos", { sessionId, urls });
+  if (!res.ok) return [];
+  return ((await res.json()) as { photos: WebPhoto[] }).photos;
 }
