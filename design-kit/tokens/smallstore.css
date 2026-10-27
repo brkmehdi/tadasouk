@@ -1,0 +1,511 @@
+/* SmallStore design layer, copied from src/app/globals.css (Tailwind CSS v4).
+   Drop it in as the app stylesheet: tokens on :root, Tailwind color names via @theme,
+   building blocks (.ui-*) in @layer components, then the motion and capture-screen pieces.
+   See ../DESIGN_SYSTEM.md for what each piece is for. */
+
+@import "tailwindcss";
+
+/* Design tokens, after the SmallStore mockup store (Stripe-checkout look): white surfaces,
+   near-black ink, hairline borders with a soft shadow, one blue for the main action. */
+:root {
+  --background: #0a0a0a;
+  --foreground: #f5f5f5;
+  --ink: rgba(26, 26, 26, 0.9);
+  --ink-2: rgba(26, 26, 26, 0.7);
+  --ink-3: rgba(26, 26, 26, 0.6);
+  --soft: rgba(26, 26, 26, 0.05);
+  --line: rgb(224, 224, 224);
+  --brand: rgb(0, 116, 212);
+  --brand-shine: rgb(58, 139, 238);
+  --danger: rgb(220, 39, 39);
+  --navy: rgb(10, 37, 64);
+  --ok: rgb(36, 180, 126);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-soft: var(--soft);
+  --color-line: var(--line);
+  --color-brand: var(--brand);
+  --color-danger: var(--danger);
+  --color-navy: var(--navy);
+  --color-ok: var(--ok);
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Ubuntu, "Noto Sans Arabic", sans-serif;
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+/* ---- building blocks (components layer, so Tailwind utilities can override them) ---- */
+@layer components {
+.ui-input {
+  width: 100%;
+  height: 44px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 16px;
+  outline: none;
+  box-shadow: 0 0 0 1px var(--line), 0 2px 4px rgba(0, 0, 0, 0.07), 0 1px 1.5px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.08s ease-in;
+}
+.ui-input::placeholder {
+  color: var(--ink-3);
+}
+.ui-input:focus {
+  box-shadow: 0 0 0 1px rgb(50, 151, 211), 0 1px 1px rgba(0, 0, 0, 0.07), 0 0 0 3px rgba(50, 151, 211, 0.9);
+}
+.ui-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.1s ease-in, transform 0.08s ease-in, box-shadow 0.08s ease-in;
+}
+.ui-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.ui-btn:disabled {
+  opacity: 0.5;
+}
+.ui-btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(50, 50, 93, 0.1), 0 2px 5px rgba(50, 50, 93, 0.1), 0 1px 1px rgba(0, 0, 0, 0.07);
+}
+/* the light that runs across the main button */
+.ui-btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 150%;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent 0%, var(--brand-shine) 50%, transparent 100%);
+  opacity: 0.55;
+  transform: translateX(-150%);
+  animation: btn-shine 3s ease infinite;
+}
+@keyframes btn-shine {
+  to {
+    transform: translateX(150%);
+  }
+}
+.ui-btn-soft {
+  background: var(--soft);
+  color: var(--ink);
+}
+.ui-btn-soft:hover:not(:disabled) {
+  background: rgba(26, 26, 26, 0.1);
+}
+.ui-btn-secondary {
+  background: #fff;
+  color: var(--ink-2);
+  box-shadow: 0 0 0 1px var(--line), 0 2px 4px rgba(0, 0, 0, 0.07), 0 1px 1.5px rgba(0, 0, 0, 0.05);
+}
+.ui-btn-secondary:hover:not(:disabled) {
+  background: var(--soft);
+}
+.ui-card {
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 0 0 1px var(--line), 0 2px 4px rgba(0, 0, 0, 0.07), 0 1px 1.5px rgba(0, 0, 0, 0.05);
+}
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--navy);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.ui-skel {
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.075);
+}
+
+/* Sheets slide up on phones; dialogs pop in with a little spring. */
+.ui-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.2);
+  animation: fade-in 0.25s both;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.ui-sheet-up {
+  animation: sheet-up 0.3s cubic-bezier(0.18, 1.25, 0.4, 1) both;
+}
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+}
+
+/* Echoes around the record button while the merchant talks. */
+.echo {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  animation: echo 1.4s ease-out infinite;
+  pointer-events: none;
+}
+.echo:nth-child(2) {
+  animation-delay: 0.45s;
+}
+.echo:nth-child(3) {
+  animation-delay: 0.9s;
+}
+@keyframes echo {
+  from {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(2.3);
+    opacity: 0;
+  }
+}
+
+/* "+" waiting for the next product: a slow pulse. */
+.armed-pulse {
+  animation: armed-pulse 1.6s ease-in-out infinite;
+}
+@keyframes armed-pulse {
+  50% {
+    box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.18);
+  }
+}
+
+/* Product card flies from the middle of the video into the tray. */
+@keyframes card-in {
+  from {
+    transform: translateX(-38vw) translateY(20vh) scale(2.2);
+    opacity: 0.3;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+[dir="rtl"] .card-in {
+  animation-name: card-in-rtl;
+}
+@keyframes card-in-rtl {
+  from {
+    transform: translateX(38vw) translateY(20vh) scale(2.2);
+    opacity: 0.3;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.card-in {
+  animation: card-in 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* A removed card shrinks and fades. */
+.card-out {
+  transform: scale(0.2) !important;
+  opacity: 0 !important;
+  transition:
+    transform 400ms ease-in,
+    opacity 400ms ease-in;
+}
+
+/* Shimmer placeholder while waiting for SAM or for a spoken price. */
+.shimmer {
+  background: linear-gradient(100deg, rgb(255 255 255 / 0.06) 30%, rgb(255 255 255 / 0.28) 50%, rgb(255 255 255 / 0.06) 70%);
+  background-size: 300% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* The price chip types itself in. --chars is set inline to the text length. */
+.type-in {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: calc(var(--chars) * 1ch + 0.75rem);
+  animation: type-in calc(var(--chars) * 60ms) steps(var(--chars), end) both;
+}
+@keyframes type-in {
+  from {
+    max-width: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-in,
+  .type-in,
+  .shimmer {
+    animation: none;
+  }
+}
+
+/* The camera shows a product already in the tray: its card pulses instead of a copy appearing. */
+.card-flash {
+  animation: card-flash 900ms ease-out both;
+}
+@keyframes card-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgb(252 211 77 / 0.95);
+    background: rgb(252 211 77 / 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgb(252 211 77 / 0);
+    background: transparent;
+  }
+}
+
+/* Shutter: a quick white flash over the video. */
+.shutter-flash {
+  animation: shutter-flash 220ms ease-out both;
+}
+@keyframes shutter-flash {
+  from {
+    opacity: 0.75;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* A new card appears as the flying shot lands in it. */
+.card-pop {
+  animation: card-pop 260ms 420ms cubic-bezier(0.2, 0.8, 0.2, 1.2) both;
+}
+@keyframes card-pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shutter-flash,
+  .card-pop,
+  .echo,
+  .armed-pulse,
+  .ui-btn-primary::after,
+  .ui-sheet-up {
+    animation: none;
+  }
+}
+
+/* Hold to frame: the ring fills while the finger rests on the video. */
+.hold-ring {
+  transform: rotate(-90deg);
+  transform-origin: 32px 32px;
+  stroke-dasharray: 163.4;
+  stroke-dashoffset: 163.4;
+  animation: hold-ring linear forwards;
+}
+@keyframes hold-ring {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+/* The frame glides onto the product the AI found. */
+.frame-box {
+  transition:
+    left 0.25s ease,
+    top 0.25s ease,
+    width 0.25s ease,
+    height 0.25s ease;
+}
+
+/* Sale screen: a line pops when its product is scanned again; notices slide in. */
+.line-in {
+  animation: line-in 0.35s cubic-bezier(0.18, 1.25, 0.4, 1);
+}
+@keyframes line-in {
+  from {
+    transform: scale(0.96);
+    background: rgba(0, 116, 212, 0.08);
+  }
+}
+.toast {
+  animation: toast 2.6s ease both;
+}
+@keyframes toast {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  10%,
+  80% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* iPhone zooms the whole page into any field whose text is under 16px, and the page then
+   looks wider than the screen. Every field stays at 16px on iOS. */
+@supports (-webkit-touch-callout: none) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Swipe strips (photos, products): no scrollbar, the content shows it scrolls. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Frame handles: a 44px touch area each; corners drawn as crop brackets, edges as short bars. */
+.frame-handle {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+.frame-handle > span {
+  display: block;
+  border: 0 solid #fff;
+}
+.frame-handle-nw,
+.frame-handle-ne,
+.frame-handle-sw,
+.frame-handle-se {
+  width: 44px;
+  height: 44px;
+}
+.frame-handle-nw {
+  left: -22px;
+  top: -22px;
+}
+.frame-handle-ne {
+  right: -22px;
+  top: -22px;
+}
+.frame-handle-sw {
+  left: -22px;
+  bottom: -22px;
+}
+.frame-handle-se {
+  right: -22px;
+  bottom: -22px;
+}
+.frame-handle-nw > span,
+.frame-handle-ne > span,
+.frame-handle-sw > span,
+.frame-handle-se > span {
+  width: 22px;
+  height: 22px;
+}
+.frame-handle-nw > span {
+  border-top-width: 4px;
+  border-left-width: 4px;
+  border-top-left-radius: 6px;
+  transform: translate(9px, 9px);
+}
+.frame-handle-ne > span {
+  border-top-width: 4px;
+  border-right-width: 4px;
+  border-top-right-radius: 6px;
+  transform: translate(-9px, 9px);
+}
+.frame-handle-sw > span {
+  border-bottom-width: 4px;
+  border-left-width: 4px;
+  border-bottom-left-radius: 6px;
+  transform: translate(9px, -9px);
+}
+.frame-handle-se > span {
+  border-bottom-width: 4px;
+  border-right-width: 4px;
+  border-bottom-right-radius: 6px;
+  transform: translate(-9px, -9px);
+}
+.frame-handle-n,
+.frame-handle-s {
+  left: calc(50% - 22px);
+}
+.frame-handle-n {
+  top: -22px;
+}
+.frame-handle-s {
+  bottom: -22px;
+}
+.frame-handle-e,
+.frame-handle-w {
+  top: calc(50% - 22px);
+}
+.frame-handle-e {
+  right: -22px;
+}
+.frame-handle-w {
+  left: -22px;
+}
+.frame-handle-n > span,
+.frame-handle-s > span {
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
+  background: #fff;
+}
+.frame-handle-e > span,
+.frame-handle-w > span {
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+  background: #fff;
+}

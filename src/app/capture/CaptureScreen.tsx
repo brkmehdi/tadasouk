@@ -3,7 +3,7 @@
 import type { ObjectDetector } from "@mediapipe/tasks-vision";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ghostCrop, grabKeyframe, locateProduct, segment, SegmentError, type Keyframe } from "@/lib/capture/cutout";
-import { createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
+import { coversCenter, createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
 import { emptyMetrics, report, type Metrics } from "@/lib/capture/metrics";
 import { innerRegion, signature, similarity, type Signature } from "@/lib/capture/similarity";
 import { betterPhotos, checkPrice, identify, scorePhoto, studioPhoto, webPhotos } from "@/lib/capture/product-actions";
@@ -38,6 +38,7 @@ import ProductSheet from "./ProductSheet";
 import ConfirmRemove from "./ConfirmRemove";
 import SellMode from "./SellMode";
 import PhotoViewer from "./PhotoViewer";
+import FrameOverlay, { type Frame, type FrameApi } from "./FrameOverlay";
 
 type Phase = "idle" | "starting" | "recording" | "stopped";
 type Caption = { id: number; text: string; kind: "heard" | "pending" | "question" | "error" };
@@ -47,8 +48,6 @@ const DETECT_EVERY_MS = 66;
 // Similarity above which a capture counts as a product already in the tray (see similarity.ts).
 const SAME_CROP = 0.74;
 const SAME_CUTOUT = 0.76;
-const HOLD_MS = 1000; // how long a finger rests on the video before the frame appears
-const MIN_FRAME = 56; // px
 const SCAN_EVERY_MS = 700; // barcode look-ups on the live video while filming
 const STORE_NAME = "Ma boutique"; // until the store settings exist (Phase 1)
 
@@ -80,17 +79,11 @@ export default function CaptureScreen() {
   // Auto-capture takes one product, then waits for "+" (or "produit suivant") so the camera
   // does not grab whatever passes while the merchant talks about the current product.
   const armedRef = useRef(true);
-  const frameRef = useRef<Frame | null>(null);
+  // Framing in progress (a finger held down, or a frame shown): auto-capture waits.
+  const framingRef = useRef(false);
+  const frameApi = useRef<FrameApi>(null);
   const scanRef = useRef({ busy: false, at: 0 });
   const lastCodeRef = useRef({ code: "", at: 0 });
-  const frameTouchedRef = useRef(false);
-  const gestureRef = useRef<{
-    mode: null | "hold" | "size" | "move" | "nw" | "ne" | "sw" | "se";
-    startX: number;
-    startY: number;
-    orig: Frame | null;
-    timer: number;
-  }>({ mode: null, startX: 0, startY: 0, orig: null, timer: 0 });
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [session, setSessionState] = useState<SessionState>(initialSession);
@@ -109,9 +102,7 @@ export default function CaptureScreen() {
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [armed, setArmedState] = useState(true);
   const [confirmId, setConfirmId] = useState<string | null>(null);
-  const [frame, setFrame] = useState<Frame | null>(null);
-  const [hold, setHold] = useState<{ x: number; y: number; n: number } | null>(null);
-  const [dragging, setDragging] = useState(false); // no glide while the finger moves the frame
+  const [framing, setFraming] = useState(false);
   const [mode, setMode] = useState<"capture" | "sell">("capture");
   const [viewer, setViewer] = useState<{ productId: string; start: number } | null>(null);
   // The latency panel is for testing only: add ?debug to the address.
@@ -467,8 +458,7 @@ export default function CaptureScreen() {
         m.firstHighlightMs = now - startedAtRef.current;
         refreshMetrics();
       }
-      const framing = frameRef.current != null || gestureRef.current.mode === "hold";
-      if (armedRef.current && !framing && triggerRef.current.update(target, video.videoWidth, video.videoHeight, now) && target) {
+      if (armedRef.current && !framingRef.current && triggerRef.current.update(target, video.videoWidth, video.videoHeight, now) && target) {
         capture(grabKeyframe(video, target.box), target.label, "auto");
       }
     }
@@ -480,7 +470,7 @@ export default function CaptureScreen() {
         .then((code) => code && handleCode(code))
         .finally(() => (sc.busy = false));
     }
-    const show = armedRef.current && !frameRef.current ? targetRef.current : null;
+    const show = armedRef.current && !framingRef.current ? targetRef.current : null;
     draw(canvas, video, show, drawBoxRef, show ? triggerRef.current.progress(now) : 0);
   }, [capture, handleCode, refreshMetrics]);
 
@@ -661,12 +651,7 @@ export default function CaptureScreen() {
     [],
   );
 
-  // ---------- hold to frame ----------
-  // Hold a finger on the video: a ring fills, then a dashed frame appears around it. Still
-  // holding, moving the finger resizes the frame from its center. After lifting, drag the
-  // frame to move it or its corners to resize it. A tap outside the frame takes the photo of
-  // what is inside. While the merchant has not touched it, the frame snaps to the product
-  // the AI finds under the finger. A quick tap only shows how it works.
+  // ---------- framing (see FrameOverlay) ----------
   const toVideo = (x: number, y: number) => {
     const v = videoRef.current!;
     const r = v.getBoundingClientRect();
@@ -674,7 +659,6 @@ export default function CaptureScreen() {
     return {
       x: (x - r.left - (r.width - v.videoWidth * scale) / 2) / scale,
       y: (y - r.top - (r.height - v.videoHeight * scale) / 2) / scale,
-      scale,
     };
   };
   const toScreen = (b: Box): Frame => {
@@ -688,22 +672,11 @@ export default function CaptureScreen() {
       h: b.h * scale,
     };
   };
-  const clampFrame = (fr: Frame): Frame => {
-    const W = window.innerWidth;
-    const H = window.innerHeight;
-    const w = Math.min(Math.max(fr.w, MIN_FRAME), W);
-    const h = Math.min(Math.max(fr.h, MIN_FRAME), H);
-    return { x: Math.min(Math.max(fr.x, 0), W - w), y: Math.min(Math.max(fr.y, 0), H - h), w, h };
-  };
-  const updateFrame = (fr: Frame | null) => {
-    frameRef.current = fr;
-    setFrame(fr);
-  };
 
-  const takeFrame = () => {
+  // Photograph what is inside a frame (screen pixels).
+  const captureFrame = (fr: Frame) => {
     const v = videoRef.current;
-    const fr = frameRef.current;
-    if (!v || !fr) return;
+    if (!v) return;
     const a = toVideo(fr.x, fr.y);
     const b = toVideo(fr.x + fr.w, fr.y + fr.h);
     const box: Box = {
@@ -712,20 +685,37 @@ export default function CaptureScreen() {
       w: Math.min(v.videoWidth, b.x) - Math.max(0, a.x),
       h: Math.min(v.videoHeight, b.y) - Math.max(0, a.y),
     };
-    updateFrame(null);
     if (box.w < 8 || box.h < 8) return;
     triggerRef.current.markManualCapture(box, performance.now());
     capture(grabKeyframe(v, box), null, "tap");
   };
 
+  // The whole product under the finger, found by the AI, as a frame on screen.
+  const locateAt = async (x: number, y: number): Promise<Frame | null> => {
+    const v = videoRef.current;
+    if (!v) return null;
+    const pt = toVideo(x, y);
+    const k = grabKeyframe(v, { x: 0, y: 0, w: 1, h: 1 }, { x: pt.x, y: pt.y });
+    const toKey = k.canvas.width / v.videoWidth;
+    const found = await locateProduct(sessionIdRef.current, k.canvas, k.point!);
+    return found ? toScreen({ x: found.x / toKey, y: found.y / toKey, w: found.w / toKey, h: found.h / toKey }) : null;
+  };
+
+  const hintHold = () => {
+    const text = "Maintenez le doigt sur un produit pour le cadrer";
+    caption(text, "pending");
+    setTimeout(() => setCaptions((l) => l.filter((c) => c.text !== text)), 2500);
+  };
+
   // The middle button once the camera is on: the frame if there is one, else the product the
-  // detector outlines, else whatever sits in the middle of the picture (the AI finds it).
+  // detector outlines (if it covers the center), else whatever sits in the middle of the
+  // picture (the AI finds it).
   const shoot = () => {
     const v = videoRef.current;
     if (!v || v.readyState < 2) return;
-    if (frameRef.current) return takeFrame();
+    if (frameApi.current?.take()) return;
     const t = targetRef.current;
-    if (t) {
+    if (t && coversCenter(t.box, v.videoWidth, v.videoHeight)) {
       triggerRef.current.markManualCapture(t.box, performance.now());
       capture(grabKeyframe(v, t.box), t.label, "tap");
       return;
@@ -734,123 +724,6 @@ export default function CaptureScreen() {
     const box: Box = { x: (v.videoWidth - side) / 2, y: (v.videoHeight - side) / 2, w: side, h: side };
     triggerRef.current.markManualCapture(box, performance.now());
     capture(grabKeyframe(v, box, { x: v.videoWidth / 2, y: v.videoHeight / 2 }), null, "tap");
-  };
-
-  // The AI looks for the whole product under the finger and the frame moves onto it.
-  const snapFrame = (x: number, y: number) => {
-    const v = videoRef.current;
-    if (!v) return;
-    const pt = toVideo(x, y);
-    const k = grabKeyframe(v, { x: 0, y: 0, w: 1, h: 1 }, { x: pt.x, y: pt.y });
-    const toKey = k.canvas.width / v.videoWidth;
-    void locateProduct(sessionIdRef.current, k.canvas, k.point!).then((found) => {
-      if (!found || frameTouchedRef.current || !frameRef.current) return;
-      updateFrame(clampFrame(toScreen({ x: found.x / toKey, y: found.y / toKey, w: found.w / toKey, h: found.h / toKey })));
-    });
-  };
-
-  const onPointerDown = (e: React.PointerEvent) => {
-    if (phase !== "recording" || !videoRef.current) return;
-    const g = gestureRef.current;
-    const fr = frameRef.current;
-    capturePointer(e);
-    if (fr) {
-      const inside = e.clientX >= fr.x && e.clientX <= fr.x + fr.w && e.clientY >= fr.y && e.clientY <= fr.y + fr.h;
-      if (!inside) {
-        takeFrame();
-        return;
-      }
-      g.mode = "move";
-      setDragging(true);
-      g.startX = e.clientX;
-      g.startY = e.clientY;
-      g.orig = fr;
-      return;
-    }
-    g.mode = "hold";
-    g.startX = e.clientX;
-    g.startY = e.clientY;
-    setHold({ x: e.clientX, y: e.clientY, n: Date.now() });
-    clearTimeout(g.timer);
-    g.timer = window.setTimeout(() => {
-      // The frame appears around the finger.
-      const side = Math.min(window.innerWidth, window.innerHeight) * 0.42;
-      frameTouchedRef.current = false;
-      updateFrame(clampFrame({ x: g.startX - side / 2, y: g.startY - side / 2, w: side, h: side }));
-      setHold(null);
-      g.mode = "size";
-      setDragging(true);
-      navigator.vibrate?.(20);
-      snapFrame(g.startX, g.startY);
-    }, HOLD_MS);
-  };
-
-  const onPointerMove = (e: React.PointerEvent) => {
-    const g = gestureRef.current;
-    const dx = e.clientX - g.startX;
-    const dy = e.clientY - g.startY;
-    if (g.mode === "hold") {
-      if (Math.hypot(dx, dy) > 14) {
-        clearTimeout(g.timer);
-        g.mode = null;
-        setHold(null);
-      }
-    } else if (g.mode === "size") {
-      // Still holding: the finger sets the frame's half-size around the hold point.
-      if (Math.hypot(dx, dy) < 18) return;
-      frameTouchedRef.current = true;
-      const hw = Math.max(MIN_FRAME / 2, Math.abs(dx));
-      const hh = Math.max(MIN_FRAME / 2, Math.abs(dy));
-      updateFrame(clampFrame({ x: g.startX - hw, y: g.startY - hh, w: hw * 2, h: hh * 2 }));
-    } else if (g.mode === "move" && g.orig) {
-      frameTouchedRef.current = true;
-      updateFrame(clampFrame({ ...g.orig, x: g.orig.x + dx, y: g.orig.y + dy }));
-    } else if (g.mode && g.mode.length === 2) {
-      resizeFrom(g.mode, dx, dy);
-    }
-  };
-
-  const onPointerUp = () => {
-    const g = gestureRef.current;
-    if (g.mode === "hold") {
-      clearTimeout(g.timer);
-      setHold(null);
-      caption("Maintenez le doigt sur un produit pour le cadrer", "pending");
-      setTimeout(() => setCaptions((l) => l.filter((c) => c.text !== "Maintenez le doigt sur un produit pour le cadrer")), 2500);
-    }
-    g.mode = null;
-    setDragging(false);
-  };
-
-  // Corner handles: resize from the opposite corner.
-  const onHandleDown = (corner: "nw" | "ne" | "sw" | "se") => (e: React.PointerEvent) => {
-    e.stopPropagation();
-    capturePointer(e);
-    const g = gestureRef.current;
-    g.mode = corner;
-    setDragging(true);
-    g.startX = e.clientX;
-    g.startY = e.clientY;
-    g.orig = frameRef.current;
-  };
-  const resizeFrom = (corner: string, dx: number, dy: number) => {
-    const o = gestureRef.current.orig;
-    if (!o) return;
-    frameTouchedRef.current = true;
-    let { x, y, w, h } = o;
-    if (corner.includes("w")) {
-      x = Math.min(o.x + dx, o.x + o.w - MIN_FRAME);
-      w = o.x + o.w - x;
-    } else {
-      w = Math.max(MIN_FRAME, o.w + dx);
-    }
-    if (corner.includes("n")) {
-      y = Math.min(o.y + dy, o.y + o.h - MIN_FRAME);
-      h = o.y + o.h - y;
-    } else {
-      h = Math.max(MIN_FRAME, o.h + dy);
-    }
-    updateFrame(clampFrame({ x, y, w, h }));
   };
 
   const products = [...session.products].sort((a, b) => b.order - a.order);
@@ -910,64 +783,16 @@ export default function CaptureScreen() {
       />
       <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
       {recording && (
-        <div
-          className="absolute inset-0 touch-none"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          {hold && (
-            <svg
-              key={hold.n}
-              className="pointer-events-none absolute h-16 w-16 -translate-x-1/2 -translate-y-1/2"
-              style={{ left: hold.x, top: hold.y }}
-              viewBox="0 0 64 64"
-              aria-hidden
-            >
-              <circle cx="32" cy="32" r="26" fill="rgba(0,0,0,0.25)" stroke="rgba(255,255,255,0.35)" strokeWidth="4" />
-              <circle
-                cx="32"
-                cy="32"
-                r="26"
-                fill="none"
-                stroke="white"
-                strokeWidth="4"
-                strokeLinecap="round"
-                className="hold-ring"
-                style={{ animationDuration: `${HOLD_MS}ms` }}
-              />
-            </svg>
-          )}
-          {frame && (
-            <div
-              className={`${dragging ? "" : "frame-box"} absolute rounded-lg border-2 border-dashed border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]`}
-              style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
-            >
-              {(["nw", "ne", "sw", "se"] as const).map((c) => (
-                <span
-                  key={c}
-                  onPointerDown={onHandleDown(c)}
-                  className={`absolute flex h-9 w-9 items-center justify-center ${c.includes("n") ? "-top-[18px]" : "-bottom-[18px]"} ${
-                    c.includes("w") ? "-left-[18px]" : "-right-[18px]"
-                  }`}
-                >
-                  <span className="h-4 w-4 rounded-full border-2 border-white bg-white/30 shadow" />
-                </span>
-              ))}
-              <button
-                type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={() => updateFrame(null)}
-                aria-label="Annuler le cadrage"
-                className="absolute -top-11 right-0 flex h-8 items-center gap-1.5 rounded-full bg-black/55 px-3 text-xs font-medium text-white backdrop-blur"
-              >
-                Annuler
-              </button>
-            </div>
-          )}
-        </div>
+        <FrameOverlay
+          ref={frameApi}
+          onCapture={captureFrame}
+          locate={locateAt}
+          onQuickTap={hintHold}
+          onFramingChange={(state) => {
+            framingRef.current = state != null;
+            setFraming(state === "frame");
+          }}
+        />
       )}
 
       {phase === "idle" && (
@@ -1068,7 +893,7 @@ export default function CaptureScreen() {
           >
             {latest.text}
           </p>
-        ) : frame ? (
+        ) : framing ? (
           <p className="rounded-2xl bg-black/55 px-3.5 py-2 text-center text-sm text-white backdrop-blur">
             Ajustez le cadre, puis appuyez sur le bouton
           </p>
@@ -1219,17 +1044,6 @@ export default function CaptureScreen() {
 }
 
 const noSubscribe = () => () => {};
-
-// Keep receiving the finger's moves even when it leaves the element (best effort).
-function capturePointer(e: React.PointerEvent) {
-  try {
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  } catch {
-    // some pointers cannot be captured; the gesture still works inside the element
-  }
-}
-
-type Frame = { x: number; y: number; w: number; h: number }; // screen pixels
 
 type Shot = { id: string; url: string; from: { left: number; top: number; width: number; height: number }; productId: string };
 

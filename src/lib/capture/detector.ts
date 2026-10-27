@@ -35,6 +35,10 @@ export async function createDetector(): Promise<ObjectDetector> {
   }
 }
 
+export function coversCenter(b: Box, W: number, H: number) {
+  return b.x <= 0.56 * W && b.x + b.w >= 0.44 * W && b.y <= 0.56 * H && b.y + b.h >= 0.44 * H;
+}
+
 export function iou(a: Box, b: Box) {
   const x1 = Math.max(a.x, b.x);
   const y1 = Math.max(a.y, b.y);
@@ -102,9 +106,9 @@ export class StillnessTrigger {
     }
     this.goneSince = 0;
     const b = target.box;
-    const cx = (b.x + b.w / 2) / W;
-    const cy = (b.y + b.h / 2) / H;
-    const centered = Math.abs(cx - 0.5) < 0.3 && Math.abs(cy - 0.5) < 0.32;
+    // The product being shown is held in the middle: its box must cover the center of the
+    // picture, not just sit near it (a jar on a shelf behind is not the product).
+    const centered = coversCenter(b, W, H);
 
     if (this.lastFired && iou(this.lastFired, b) > 0.35) return false; // same object, still there
 

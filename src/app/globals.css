@@ -401,3 +401,106 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Frame handles: a 44px touch area each; corners drawn as crop brackets, edges as short bars. */
+.frame-handle {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+.frame-handle > span {
+  display: block;
+  border: 0 solid #fff;
+}
+.frame-handle-nw,
+.frame-handle-ne,
+.frame-handle-sw,
+.frame-handle-se {
+  width: 44px;
+  height: 44px;
+}
+.frame-handle-nw {
+  left: -22px;
+  top: -22px;
+}
+.frame-handle-ne {
+  right: -22px;
+  top: -22px;
+}
+.frame-handle-sw {
+  left: -22px;
+  bottom: -22px;
+}
+.frame-handle-se {
+  right: -22px;
+  bottom: -22px;
+}
+.frame-handle-nw > span,
+.frame-handle-ne > span,
+.frame-handle-sw > span,
+.frame-handle-se > span {
+  width: 22px;
+  height: 22px;
+}
+.frame-handle-nw > span {
+  border-top-width: 4px;
+  border-left-width: 4px;
+  border-top-left-radius: 6px;
+  transform: translate(9px, 9px);
+}
+.frame-handle-ne > span {
+  border-top-width: 4px;
+  border-right-width: 4px;
+  border-top-right-radius: 6px;
+  transform: translate(-9px, 9px);
+}
+.frame-handle-sw > span {
+  border-bottom-width: 4px;
+  border-left-width: 4px;
+  border-bottom-left-radius: 6px;
+  transform: translate(9px, -9px);
+}
+.frame-handle-se > span {
+  border-bottom-width: 4px;
+  border-right-width: 4px;
+  border-bottom-right-radius: 6px;
+  transform: translate(-9px, -9px);
+}
+.frame-handle-n,
+.frame-handle-s {
+  left: calc(50% - 22px);
+}
+.frame-handle-n {
+  top: -22px;
+}
+.frame-handle-s {
+  bottom: -22px;
+}
+.frame-handle-e,
+.frame-handle-w {
+  top: calc(50% - 22px);
+}
+.frame-handle-e {
+  right: -22px;
+}
+.frame-handle-w {
+  left: -22px;
+}
+.frame-handle-n > span,
+.frame-handle-s > span {
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
+  background: #fff;
+}
+.frame-handle-e > span,
+.frame-handle-w > span {
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+  background: #fff;
+}

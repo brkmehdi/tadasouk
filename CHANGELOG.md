@@ -99,6 +99,14 @@ Phase 0, live capture spike.
   (`/api/photo-score`: muse-spark-1.3 rates sharpness, light, framing, background, plus one
   tip), "Mettre en principale" and "Supprimer". Web photos are scored by URL.
 - iPhone: fields stay at 16px so Safari no longer zooms the page when one is focused.
+- Hold-to-frame rebuilt as its own component (FrameOverlay) so dragging only redraws the
+  frame: the hold ring sits 92 px above the finger, the frame opens nearly full screen and
+  snaps onto the product, 4 corner brackets and 4 edge handles with 44 px touch areas, two-finger
+  pinch, hint only once the frame shows.
+- Auto-capture and the shutter only take a detected product whose box covers the image center
+  (they grabbed a jar on a shelf behind the held product).
+- design-kit/: build prompt for Muse (MUSE_PROMPT.md), design system, tokens (CSS and JSON),
+  eight screenshots of the working app, two shop scenes made with muse-image-1.0, icon.
 - Live preview on Cloudflare Workers. Cache Components turned off: it hangs in the Workers runtime.
 - Latency panel on the record screen: first highlight, detector time per frame, capture to card,
   spoken command to UI update.

@@ -27,6 +27,11 @@ The Cloudflare Worker stays light: it adds the API key, checks the spending caps
 responses through. Frame sampling, mask decoding and compositing happen on the phone. Raw videos go
 from the phone straight to R2 through signed URLs and are deleted after 7 days.
 
+## Design kit
+
+`design-kit/` holds the build prompt for Muse (`MUSE_PROMPT.md`), the design system, tokens,
+and screenshots of every screen. Start there to rebuild or extend the app.
+
 ## Run it locally
 
 Requirements: Node 20.17+ (or 22.9+), a Meta Model API key from [dev.meta.ai](https://dev.meta.ai).
