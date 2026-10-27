@@ -34,6 +34,7 @@ import {
 import { explainMediaError, openCamera, type MediaHelp } from "@/lib/capture/media";
 import { startVoice } from "@/lib/capture/voice";
 import ProductCard from "./ProductCard";
+import ProductTray from "./ProductTray";
 import ProductSheet from "./ProductSheet";
 import ConfirmRemove from "./ConfirmRemove";
 import SellMode from "./SellMode";
@@ -821,8 +822,8 @@ export default function CaptureScreen() {
         </div>
       )}
 
-      {/* product tray: ends above the text and the controls */}
-      <aside className="absolute end-0 top-[max(3.25rem,calc(env(safe-area-inset-top)+2.5rem))] bottom-[calc(10.5rem+env(safe-area-inset-bottom))] pointer-events-none flex w-[30vw] max-w-[8.5rem] flex-col gap-3 overflow-y-auto ps-1 pe-2.5 pt-2 pb-2 *:pointer-events-auto">
+      {/* product tray: ends above the text and the controls, scrolls when the cards do not fit */}
+      <ProductTray currentId={session.currentId}>
         {products.map((p) => (
           <ProductCard
             key={p.id}
@@ -835,7 +836,7 @@ export default function CaptureScreen() {
             onAttach={onAttach}
           />
         ))}
-      </aside>
+      </ProductTray>
 
       {/* top bar */}
       <div className="absolute inset-x-0 top-0 flex items-center gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-xs">

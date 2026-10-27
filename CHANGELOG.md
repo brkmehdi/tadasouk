@@ -124,3 +124,6 @@ Phase 0, live capture spike.
   tools, and a hackathon compliance checklist.
 - `docs/DEMO_SCRIPT.md`: the provenance sentence the demo video opens with, and the outline.
 - Checked the full git history: no API key or other secret was ever committed.
+- Product tray: with many products the column now scrolls on iPhone (it used to cut the last
+  card and not move). It is only as tall as its cards, fades the edge where more cards are
+  hidden, and scrolls back to the current card after each capture (`ProductTray.tsx`).
