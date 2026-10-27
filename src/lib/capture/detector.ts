@@ -89,7 +89,7 @@ export class StillnessTrigger {
 
   constructor(
     private holdMs = 800,
-    private cooldownMs = 1500,
+    private cooldownMs = 2500,
   ) {}
 
   update(target: Target | null, W: number, H: number, now: number): boolean {

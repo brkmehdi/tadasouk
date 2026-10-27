@@ -1,20 +1,43 @@
 // Live capture session state and the reducer that applies the agent's tool calls.
 // Everything here runs in the browser; the server only sees a compact copy per agent call.
 
+export type ProductImage = {
+  id: string;
+  url: string;
+  source: "camera" | "ai";
+  pending: boolean; // camera: SAM cutout not back yet, url is the instant crop
+};
+
+export type PriceCheck =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | {
+      status: "done";
+      currency: string;
+      low: number | null;
+      average: number | null;
+      high: number | null;
+      verdict: "cheap" | "fair" | "expensive" | "unknown";
+      note: string;
+      sources: { title: string; url: string; price: number | null }[];
+    };
+
 export type Product = {
   id: string;
   order: number;
   name: string | null;
   label: string | null; // what the on-device detector called it, e.g. "bottle"
   color: string | null; // dominant color of the cutout, for "the red one"
-  cutoutUrl: string | null;
-  ghostUrl: string | null; // instant crop shown while SAM works
+  images: ProductImage[]; // first one is the cover
+  description: string | null;
   price: number | null;
   compareAtPrice: number | null;
   currency: string;
   quantity: number | null;
   question: string | null;
-  status: "segmenting" | "ready" | "failed" | "removing";
+  status: "active" | "failed" | "removing";
+  photos: "idle" | "loading" | "error"; // AI studio photos
+  priceCheck: PriceCheck | null;
   capturedAt: number;
 };
 
@@ -27,7 +50,10 @@ export type SessionState = {
 
 export type ToolCall = { name: string; args: Record<string, unknown> };
 
-export type Applied = { state: SessionState; question: string | null; changed: boolean };
+// Calls the browser runs after applying the state change (they need network and time).
+export type Effect = { kind: "better_photos" | "check_price"; productId: string };
+
+export type Applied = { state: SessionState; question: string | null; changed: boolean; effects: Effect[] };
 
 export function initialSession(currency = "MAD"): SessionState {
   return { currency, products: [], currentId: null, history: [] };
@@ -35,6 +61,14 @@ export function initialSession(currency = "MAD"): SessionState {
 
 export function visible(state: SessionState) {
   return state.products.filter((p) => p.status !== "removing");
+}
+
+export function cover(p: Product) {
+  return p.images[0] ?? null;
+}
+
+export function displayName(p: Product) {
+  return p.name ?? (p.label ? p.label[0].toUpperCase() + p.label.slice(1) : "Produit");
 }
 
 // Compact copy of the state for the agent: ids, names, prices, and capture order.
@@ -52,38 +86,120 @@ export function agentView(state: SessionState) {
       price: p.price,
       compareAtPrice: p.compareAtPrice,
       quantity: p.quantity,
+      description: p.description,
+      photos: p.images.length,
     })),
   };
 }
 
-export function addCaptured(
-  state: SessionState,
-  p: Pick<Product, "id" | "label" | "ghostUrl" | "capturedAt">,
-): SessionState {
-  const order = state.products.reduce((m, x) => Math.max(m, x.order), 0) + 1;
-  const product: Product = {
-    ...p,
-    order,
+function nextOrder(state: SessionState) {
+  return state.products.reduce((m, x) => Math.max(m, x.order), 0) + 1;
+}
+
+function blank(state: SessionState, id: string): Product {
+  return {
+    id,
+    order: nextOrder(state),
     name: null,
+    label: null,
     color: null,
-    cutoutUrl: null,
+    images: [],
+    description: null,
     price: null,
     compareAtPrice: null,
     currency: state.currency,
     quantity: null,
     question: null,
-    status: "segmenting",
+    status: "active",
+    photos: "idle",
+    priceCheck: null,
+    capturedAt: Date.now(),
   };
-  return {
-    ...state,
-    history: [...state.history, state.products],
-    products: [...state.products, product],
-    currentId: product.id,
+}
+
+// Saves the current products so the next change can be undone.
+function snapshot(state: SessionState): SessionState {
+  return { ...state, history: [...state.history.slice(-30), state.products] };
+}
+
+export function addCaptured(
+  state: SessionState,
+  p: { id: string; imageId: string; label: string | null; ghostUrl: string },
+): SessionState {
+  const product: Product = {
+    ...blank(state, p.id),
+    label: p.label,
+    images: [{ id: p.imageId, url: p.ghostUrl, source: "camera", pending: true }],
   };
+  const s = snapshot(state);
+  return { ...s, products: [...s.products, product], currentId: product.id };
 }
 
 export function patchProduct(state: SessionState, id: string, patch: Partial<Product>): SessionState {
   return { ...state, products: state.products.map((p) => (p.id === id ? { ...p, ...patch } : p)) };
+}
+
+// A merchant edit from the product sheet: undoable like a voice command.
+export function editProduct(state: SessionState, id: string, patch: Partial<Product>): SessionState {
+  return patchProduct(snapshot(state), id, { ...patch, question: null });
+}
+
+export function addImage(state: SessionState, productId: string, image: ProductImage): SessionState {
+  return mapProduct(state, productId, (p) => ({ ...p, images: [...p.images, image] }));
+}
+
+export function patchImage(
+  state: SessionState,
+  productId: string,
+  imageId: string,
+  patch: Partial<ProductImage>,
+): SessionState {
+  return mapProduct(state, productId, (p) => ({
+    ...p,
+    images: p.images.map((i) => (i.id === imageId ? { ...i, ...patch } : i)),
+  }));
+}
+
+export function dropImage(state: SessionState, productId: string, imageId: string): SessionState {
+  return mapProduct(state, productId, (p) => ({ ...p, images: p.images.filter((i) => i.id !== imageId) }));
+}
+
+export function makeCover(state: SessionState, productId: string, imageId: string): SessionState {
+  return mapProduct(state, productId, (p) => {
+    const img = p.images.find((i) => i.id === imageId);
+    return img ? { ...p, images: [img, ...p.images.filter((i) => i !== img)] } : p;
+  });
+}
+
+export function removeProduct(state: SessionState, id: string): SessionState {
+  let s = patchProduct(snapshot(state), id, { status: "removing" });
+  if (s.currentId === id) s = { ...s, currentId: visible(s).sort((a, b) => a.order - b.order).at(-1)?.id ?? null };
+  return s;
+}
+
+function mapProduct(state: SessionState, id: string, fn: (p: Product) => Product): SessionState {
+  return { ...state, products: state.products.map((p) => (p.id === id ? fn(p) : p)) };
+}
+
+// Undo restores prices, names and descriptions, not the photos and checks that arrived since.
+function undo(state: SessionState): SessionState {
+  const prev = state.history.at(-1);
+  if (!prev) return state;
+  const products = prev.map((old) => {
+    const now = state.products.find((p) => p.id === old.id);
+    if (!now) return old;
+    return {
+      ...old,
+      images: now.images,
+      color: now.color,
+      label: now.label,
+      photos: now.photos,
+      priceCheck: now.priceCheck,
+      status: now.status === "removing" ? "active" : now.status,
+    } satisfies Product;
+  });
+  const currentId = products.some((p) => p.id === state.currentId) ? state.currentId : (products.at(-1)?.id ?? null);
+  return { ...state, products, currentId, history: state.history.slice(0, -1) };
 }
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" ? Number(v) : NaN);
@@ -93,6 +209,7 @@ export function applyCalls(state: SessionState, calls: ToolCall[], newId: () => 
   let s = state;
   let question: string | null = null;
   let changed = false;
+  const effects: Effect[] = [];
   const before = state.products;
 
   const find = (args: Record<string, unknown>) => {
@@ -106,22 +223,11 @@ export function applyCalls(state: SessionState, calls: ToolCall[], newId: () => 
 
   for (const { name, args } of calls) {
     if (name === "undo_last") {
-      const prev = s.history.at(-1)?.map((old) => {
-        // Undo restores prices and names, not the cutout that SAM delivered since.
-        const now = s.products.find((p) => p.id === old.id);
-        if (!now) return old;
-        const status = now.status === "removing" ? (now.cutoutUrl ? "ready" : old.status) : now.status;
-        return { ...old, cutoutUrl: now.cutoutUrl, color: now.color, label: now.label, status };
-      });
-      if (prev) {
-        s = { ...s, products: prev, history: s.history.slice(0, -1) };
-        if (!prev.some((p) => p.id === s.currentId)) s.currentId = prev.at(-1)?.id ?? null;
-      }
+      s = undo(s);
       continue;
     }
     if (name === "create_product") {
       const id = newId();
-      const order = s.products.reduce((m, x) => Math.max(m, x.order), 0) + 1;
       const price = num(args.price);
       const qty = num(args.quantity);
       s = {
@@ -130,20 +236,10 @@ export function applyCalls(state: SessionState, calls: ToolCall[], newId: () => 
         products: [
           ...s.products,
           {
-            id,
-            order,
+            ...blank(s, id),
             name: String(args.name ?? "") || null,
-            label: null,
-            color: null,
-            cutoutUrl: null,
-            ghostUrl: null,
             price: Number.isFinite(price) ? round2(price) : null,
-            compareAtPrice: null,
-            currency: s.currency,
             quantity: Number.isFinite(qty) ? Math.max(0, Math.round(qty)) : null,
-            question: null,
-            status: "ready",
-            capturedAt: Date.now(),
           },
         ],
       };
@@ -177,6 +273,9 @@ export function applyCalls(state: SessionState, calls: ToolCall[], newId: () => 
     } else if (name === "rename_product") {
       const n = String(args.name ?? "").trim();
       if (n) update(p.id, { name: n });
+    } else if (name === "set_description") {
+      const d = String(args.description ?? "").trim();
+      if (d) update(p.id, { description: d });
     } else if (name === "set_quantity") {
       const q = num(args.quantity);
       if (q >= 0) update(p.id, { quantity: Math.round(q) });
@@ -184,13 +283,17 @@ export function applyCalls(state: SessionState, calls: ToolCall[], newId: () => 
       update(p.id, { status: "removing" });
       if (s.currentId === p.id) {
         const rest = visible(s).sort((a, b) => a.order - b.order);
-        s.currentId = rest.at(-1)?.id ?? null;
+        s = { ...s, currentId: rest.at(-1)?.id ?? null };
       }
+    } else if (name === "find_better_photos") {
+      effects.push({ kind: "better_photos", productId: p.id });
+    } else if (name === "check_price") {
+      effects.push({ kind: "check_price", productId: p.id });
     }
   }
 
-  if (changed) s = { ...s, history: [...s.history, before] };
-  return { state: s, question, changed };
+  if (changed) s = { ...s, history: [...s.history.slice(-30), before] };
+  return { state: s, question, changed, effects };
 }
 
 // Products marked "removing" leave the DOM after their exit animation.

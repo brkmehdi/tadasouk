@@ -72,7 +72,7 @@ export async function segment(sessionId: string, k: Keyframe): Promise<Cutout | 
   return composite(k, raster, mask.mask.width, mask.mask.height, mask.bounds, samMs);
 }
 
-async function* sseEvents(body: ReadableStream<Uint8Array>) {
+export async function* sseEvents(body: ReadableStream<Uint8Array>) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buf = "";

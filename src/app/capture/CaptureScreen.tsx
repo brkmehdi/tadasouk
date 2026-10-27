@@ -5,18 +5,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ghostCrop, grabKeyframe, segment, SegmentError, type Keyframe } from "@/lib/capture/cutout";
 import { createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
 import { emptyMetrics, report, type Metrics } from "@/lib/capture/metrics";
+import { betterPhotos, checkPrice } from "@/lib/capture/product-actions";
 import {
   addCaptured,
+  addImage,
   agentView,
   applyCalls,
+  displayName,
+  dropImage,
+  editProduct,
   initialSession,
+  makeCover,
+  patchImage,
   patchProduct,
   purgeRemoved,
-  type Product,
+  removeProduct,
+  type Effect,
   type SessionState,
   type ToolCall,
 } from "@/lib/capture/session";
 import { startVoice } from "@/lib/capture/voice";
+import ProductCard, { formatPrice } from "./ProductCard";
+import ProductSheet from "./ProductSheet";
 
 type Phase = "idle" | "starting" | "recording" | "stopped";
 type Caption = { id: number; text: string; kind: "heard" | "pending" | "question" | "error" };
@@ -45,6 +55,7 @@ export default function CaptureScreen() {
   const captionIdRef = useRef(0);
   const loopRef = useRef(0);
   const lastDetectRef = useRef(0);
+  const attachIdRef = useRef<string | null>(null);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [session, setSessionState] = useState<SessionState>(initialSession);
@@ -54,6 +65,8 @@ export default function CaptureScreen() {
   const [metricsView, setMetricsView] = useState(report(emptyMetrics()));
   const [showMetrics, setShowMetrics] = useState(false);
   const [upload, setUpload] = useState<string | null>(null);
+  const [attachId, setAttachIdState] = useState<string | null>(null);
+  const [open, setOpen] = useState<{ id: string; from: DOMRect } | null>(null);
 
   const setSession = useCallback((next: SessionState) => {
     sessionRef.current = next;
@@ -71,32 +84,84 @@ export default function CaptureScreen() {
 
   const refreshMetrics = useCallback(() => setMetricsView(report(metricsRef.current)), []);
 
+  // "+" on a card: the next captures add photos to that product instead of making new ones.
+  const setAttach = useCallback((id: string | null) => {
+    attachIdRef.current = id;
+    setAttachIdState(id);
+  }, []);
+
   // ---------- capture: keyframe -> instant card -> SAM cutout ----------
   const capture = useCallback(
     (k: Keyframe, label: string | null) => {
       const triggeredAt = performance.now();
       lastCaptureAtRef.current = triggeredAt;
-      const id = crypto.randomUUID();
-      setSession(addCaptured(sessionRef.current, { id, label, ghostUrl: ghostCrop(k), capturedAt: Date.now() }));
+      const imageId = crypto.randomUUID();
+      const ghostUrl = ghostCrop(k);
+      const attachTo = sessionRef.current.products.find(
+        (p) => p.id === attachIdRef.current && p.status !== "removing",
+      );
+      const id = attachTo?.id ?? crypto.randomUUID();
+      setSession(
+        attachTo
+          ? addImage(sessionRef.current, id, { id: imageId, url: ghostUrl, source: "camera", pending: true })
+          : addCaptured(sessionRef.current, { id, imageId, label, ghostUrl }),
+      );
       navigator.vibrate?.(30);
       segment(sessionIdRef.current, k)
         .then((cut) => {
           const ms = performance.now() - triggeredAt;
-          if (cut) {
-            setSession(patchProduct(sessionRef.current, id, { cutoutUrl: cut.url, color: cut.color, status: "ready" }));
-            metricsRef.current.capture.push({ at: Date.now(), ms, parts: { sam: cut.samMs } });
-          } else {
-            setSession(patchProduct(sessionRef.current, id, { status: "failed" }));
-          }
+          let next = patchImage(sessionRef.current, id, imageId, cut ? { url: cut.url, pending: false } : { pending: false });
+          const product = next.products.find((p) => p.id === id);
+          if (cut && product && !product.color) next = patchProduct(next, id, { color: cut.color });
+          setSession(next);
+          if (cut) metricsRef.current.capture.push({ at: Date.now(), ms, parts: { sam: cut.samMs } });
           refreshMetrics();
         })
         .catch((err: unknown) => {
-          setSession(patchProduct(sessionRef.current, id, { status: "failed" }));
+          setSession(patchImage(sessionRef.current, id, imageId, { pending: false }));
           caption(err instanceof SegmentError ? err.message : "Segmentation failed", "error");
         });
       return id;
     },
     [caption, refreshMetrics, setSession],
+  );
+
+  // ---------- slow product actions: AI photos, price check ----------
+  const runEffect = useCallback(
+    (effect: Effect) => {
+      const sid = sessionIdRef.current || crypto.randomUUID();
+      const product = sessionRef.current.products.find((p) => p.id === effect.productId);
+      if (!product) return;
+      if (effect.kind === "better_photos") {
+        if (product.photos === "loading") return;
+        setSession(patchProduct(sessionRef.current, product.id, { photos: "loading" }));
+        betterPhotos(sid, product, (url) =>
+          setSession(addImage(sessionRef.current, product.id, { id: crypto.randomUUID(), url, source: "ai", pending: false })),
+        )
+          .then(() => setSession(patchProduct(sessionRef.current, product.id, { photos: "idle" })))
+          .catch((err: unknown) => {
+            setSession(patchProduct(sessionRef.current, product.id, { photos: "error" }));
+            caption(err instanceof Error ? err.message : String(err), "error");
+          });
+      } else {
+        if (product.priceCheck?.status === "loading") return;
+        setSession(patchProduct(sessionRef.current, product.id, { priceCheck: { status: "loading" } }));
+        caption(`Je cherche le prix de « ${displayName(product)} » au Maroc…`, "pending");
+        checkPrice(sid, product).then((check) => {
+          setSession(patchProduct(sessionRef.current, product.id, { priceCheck: check }));
+          if (check.status === "done" && check.low != null && check.high != null) {
+            const avg = check.average != null ? `, moyenne ${formatPrice(check.average, check.currency)}` : "";
+            caption(
+              `${displayName(product)} : ${formatPrice(check.low, check.currency)} à ${formatPrice(check.high, check.currency)}${avg}`,
+              "heard",
+            );
+          } else if (check.status === "error") {
+            caption(check.message, "error");
+          }
+        });
+      }
+    },
+    [caption, setSession],
   );
 
   const centerBox = (v: HTMLVideoElement): Box => {
@@ -177,6 +242,7 @@ export default function CaptureScreen() {
           const applied = applyCalls(sessionRef.current, calls, () => crypto.randomUUID());
           setSession(applied.state);
           if (applied.question) caption(applied.question, "question");
+          applied.effects.forEach(runEffect);
           if (applied.state.products.some((p) => p.status === "removing")) {
             setTimeout(() => setSession(purgeRemoved(sessionRef.current)), 450);
           }
@@ -194,7 +260,7 @@ export default function CaptureScreen() {
         }
       });
     },
-    [caption, capture, refreshMetrics, setSession],
+    [caption, capture, refreshMetrics, runEffect, setSession],
   );
 
   // ---------- start / stop ----------
@@ -205,6 +271,8 @@ export default function CaptureScreen() {
     metricsRef.current = emptyMetrics();
     refreshMetrics();
     setSession(initialSession(sessionRef.current.currency));
+    setAttach(null);
+    setOpen(null);
     setCaptions([]);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -257,7 +325,7 @@ export default function CaptureScreen() {
       caption(err instanceof Error ? err.message : String(err), "error");
       setPhase("idle");
     }
-  }, [caption, handleChunk, step, refreshMetrics, setSession]);
+  }, [caption, handleChunk, step, refreshMetrics, setAttach, setSession]);
 
   const stop = useCallback(async () => {
     cancelAnimationFrame(loopRef.current);
@@ -308,6 +376,20 @@ export default function CaptureScreen() {
   };
 
   const products = [...session.products].sort((a, b) => b.order - a.order);
+  const openProduct = open ? session.products.find((p) => p.id === open.id && p.status !== "removing") : undefined;
+  const attachProduct = attachId ? session.products.find((p) => p.id === attachId) : undefined;
+
+  const onRemove = (id: string) => {
+    setSession(removeProduct(sessionRef.current, id));
+    if (attachIdRef.current === id) setAttach(null);
+    if (open?.id === id) setOpen(null);
+    setTimeout(() => setSession(purgeRemoved(sessionRef.current)), 450);
+  };
+  const onOpen = (id: string, from: DOMRect) => {
+    setSession({ ...sessionRef.current, currentId: id }); // voice commands now apply to it
+    setOpen({ id, from });
+  };
+  const onAttach = (id: string) => setAttach(attachIdRef.current === id ? null : id);
 
   return (
     <main className="fixed inset-0 overflow-hidden bg-black text-white select-none">
@@ -335,7 +417,15 @@ export default function CaptureScreen() {
       {/* product tray */}
       <aside className="absolute inset-y-0 end-0 flex w-[30vw] max-w-36 flex-col gap-2 overflow-y-auto px-2 pt-14 pb-40">
         {products.map((p) => (
-          <ProductCard key={p.id} p={p} current={p.id === session.currentId} />
+          <ProductCard
+            key={p.id}
+            p={p}
+            current={p.id === session.currentId}
+            attaching={p.id === attachId}
+            onOpen={onOpen}
+            onRemove={onRemove}
+            onAttach={onAttach}
+          />
         ))}
       </aside>
 
@@ -359,6 +449,35 @@ export default function CaptureScreen() {
           {metricsView.commandP50 != null ? `${(metricsView.commandP50 / 1000).toFixed(1)}s` : "–"}
         </button>
       </div>
+
+      {attachProduct && (
+        <div className="absolute inset-x-0 top-12 z-10 flex justify-center px-3">
+          <div className="flex items-center gap-3 rounded-full bg-sky-400 py-1.5 ps-4 pe-1.5 text-sm font-medium text-black shadow-lg">
+            <span dir="auto" className="truncate">
+              Photos pour « {displayName(attachProduct)} »
+            </span>
+            <button type="button" onClick={() => setAttach(null)} className="rounded-full bg-black px-3 py-1 text-white">
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {openProduct && open && (
+        <ProductSheet
+          key={openProduct.id}
+          p={openProduct}
+          from={open.from}
+          attaching={attachId === openProduct.id}
+          onClose={() => setOpen(null)}
+          onEdit={(patch) => setSession(editProduct(sessionRef.current, openProduct.id, patch))}
+          onRemoveImage={(imageId) => setSession(dropImage(sessionRef.current, openProduct.id, imageId))}
+          onCover={(imageId) => setSession(makeCover(sessionRef.current, openProduct.id, imageId))}
+          onAttach={() => onAttach(openProduct.id)}
+          onBetterPhotos={() => runEffect({ kind: "better_photos", productId: openProduct.id })}
+          onCheckPrice={() => runEffect({ kind: "check_price", productId: openProduct.id })}
+        />
+      )}
 
       {showMetrics && (
         <MetricsPanel m={metricsView} upload={upload} onClose={() => setShowMetrics(false)} />
@@ -403,69 +522,6 @@ export default function CaptureScreen() {
       </div>
     </main>
   );
-}
-
-function ProductCard({ p, current }: { p: Product; current: boolean }) {
-  const img = p.cutoutUrl ?? p.ghostUrl;
-  return (
-    <div
-      className={`card-in relative shrink-0 rounded-2xl bg-white/10 p-1.5 backdrop-blur-md transition-all ${
-        current ? "ring-2 ring-amber-300" : ""
-      } ${p.status === "removing" ? "card-out" : ""}`}
-    >
-      <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl bg-white/5">
-        {img && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={img}
-            alt={p.name ?? p.label ?? ""}
-            className={`max-h-full max-w-full object-contain transition-all duration-500 ${
-              p.cutoutUrl ? "drop-shadow-[0_4px_10px_rgba(0,0,0,0.5)]" : "opacity-60 blur-[1px]"
-            }`}
-          />
-        )}
-        {p.status === "segmenting" && <div className="shimmer absolute inset-0" />}
-        {p.question && (
-          <span className="absolute end-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-amber-400 text-sm font-bold text-black">
-            ?
-          </span>
-        )}
-      </div>
-      {p.name && (
-        <p dir="auto" className="mt-1 truncate text-xs text-neutral-200">
-          {p.name}
-        </p>
-      )}
-      <div className="mt-1 flex flex-wrap items-baseline gap-x-1.5">
-        {p.price == null ? (
-          <span className="shimmer block h-5 w-16 rounded-md" />
-        ) : (
-          <>
-            <PriceChip value={p.price} currency={p.currency} />
-            {p.compareAtPrice != null && (
-              <span className="text-xs text-neutral-400 line-through">{formatPrice(p.compareAtPrice, p.currency)}</span>
-            )}
-          </>
-        )}
-        {p.quantity != null && <span className="text-[10px] text-neutral-400">×{p.quantity}</span>}
-      </div>
-    </div>
-  );
-}
-
-// The price types itself in, one character at a time.
-function PriceChip({ value, currency }: { value: number; currency: string }) {
-  const text = formatPrice(value, currency);
-  return (
-    <span key={text} className="type-in rounded-md bg-amber-300 px-1.5 py-0.5 font-mono text-sm font-bold text-black" style={{ "--chars": text.length } as React.CSSProperties}>
-      {text}
-    </span>
-  );
-}
-
-function formatPrice(v: number, currency: string) {
-  const n = Number.isInteger(v) ? String(v) : v.toFixed(2);
-  return currency === "EUR" ? `${n} €` : `${n} DH`;
 }
 
 function MetricsPanel({

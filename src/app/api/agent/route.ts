@@ -14,6 +14,8 @@ export type AgentProduct = {
   price: number | null;
   compareAtPrice: number | null;
   quantity: number | null;
+  description: string | null;
+  photos: number;
 };
 
 export type AgentState = {
@@ -66,6 +68,24 @@ const TOOLS = [
     "Set how many units are in stock.",
     { product_id: ref, quantity: { type: "integer" } },
     ["product_id", "quantity"],
+  ),
+  fn(
+    "set_description",
+    "Set the product description the merchant dictates. Keep their words, fix only obvious transcription slips.",
+    { product_id: ref, description: { type: "string" } },
+    ["product_id", "description"],
+  ),
+  fn(
+    "find_better_photos",
+    "The merchant wants nicer photos of a product ('find better images', 'chouf lia tswira mzyana').",
+    { product_id: ref },
+    ["product_id"],
+  ),
+  fn(
+    "check_price",
+    "The merchant asks whether a price is competitive, or what the product sells for elsewhere.",
+    { product_id: ref },
+    ["product_id"],
   ),
   fn("remove_product", "Remove a product from the store.", { product_id: ref }, ["product_id"]),
   fn("undo_last", "Undo the previous change.", {}, []),

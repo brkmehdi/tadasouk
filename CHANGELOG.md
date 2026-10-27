@@ -27,5 +27,14 @@ Phase 0, live capture spike.
 - Spending caps per capture session and per day, checked before every Meta API call, with one
   usage log line per call (`/api/usage` shows the totals).
 - Raw video upload straight from the browser to R2 with a short-lived signed URL (`/api/upload-url`).
+- Product cards: ✕ deletes a product, + adds more photos to the same product (next captures go to it).
+- Tap a card: it grows into a product sheet over the video (recording keeps going) with all photos,
+  name, price, stock and description; voice commands apply to the open product. Closing shrinks it
+  back into its card.
+- "Better photos" (button or voice): `muse-image-1.0` takes the real product photo, looks the
+  product up on the web by itself, and returns two studio photos marked "IA".
+- "Is my price competitive?" (button or voice): `muse-spark-1.3` with web search from Morocco returns
+  the lowest, average and highest price found, a verdict and the sources.
+- New agent tools: set_description, find_better_photos, check_price.
 - Latency panel on the record screen: first highlight, detector time per frame, capture to card,
   spoken command to UI update.
