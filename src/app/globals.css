@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #f5f5f5;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, "Noto Sans Arabic", sans-serif;
+  overscroll-behavior: none;
+}
+
+/* Product card flies from the middle of the video into the tray. */
+@keyframes card-in {
+  from {
+    transform: translateX(-38vw) translateY(20vh) scale(2.2);
+    opacity: 0.3;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+[dir="rtl"] .card-in {
+  animation-name: card-in-rtl;
+}
+@keyframes card-in-rtl {
+  from {
+    transform: translateX(38vw) translateY(20vh) scale(2.2);
+    opacity: 0.3;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.card-in {
+  animation: card-in 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* A removed card shrinks and fades. */
+.card-out {
+  transform: scale(0.2) !important;
+  opacity: 0 !important;
+  transition:
+    transform 400ms ease-in,
+    opacity 400ms ease-in;
+}
+
+/* Shimmer placeholder while waiting for SAM or for a spoken price. */
+.shimmer {
+  background: linear-gradient(100deg, rgb(255 255 255 / 0.06) 30%, rgb(255 255 255 / 0.28) 50%, rgb(255 255 255 / 0.06) 70%);
+  background-size: 300% 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* The price chip types itself in. --chars is set inline to the text length. */
+.type-in {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: calc(var(--chars) * 1ch + 0.75rem);
+  animation: type-in calc(var(--chars) * 60ms) steps(var(--chars), end) both;
+}
+@keyframes type-in {
+  from {
+    max-width: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-in,
+  .type-in,
+  .shimmer {
+    animation: none;
+  }
+}
