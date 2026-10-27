@@ -26,7 +26,7 @@ screen lets the merchant scan products at the counter and send the receipt on Wh
 ## 2. Hard rules (from the hackathon brief, non-negotiable)
 
 1. New public GitHub repository (the owner may keep it private during the build), all code
-   written during the hackathon, AGPL-3.0 `LICENSE`, a `README.md` that says what was built
+   written during the hackathon, an all-rights-reserved `LICENSE` (no open source license), a `README.md` that says what was built
    during the hackathon, a `CHANGELOG.md` updated every day, commits at least daily.
 2. All intelligence runs on the **Meta Model API** (`https://api.meta.ai/v1`, OpenAI
    compatible): `muse-spark-1.3` for reasoning and tool calls, `sam-3.1` for segmentation,

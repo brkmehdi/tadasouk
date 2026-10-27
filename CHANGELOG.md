@@ -110,3 +110,17 @@ Phase 0, live capture spike.
 - Live preview on Cloudflare Workers. Cache Components turned off: it hangs in the Workers runtime.
 - Latency panel on the record screen: first highlight, detector time per frame, capture to card,
   spoken command to UI update.
+
+## 2026-10-28
+
+- License changed from AGPL-3.0 to all rights reserved: the code is public only so judges can
+  evaluate it (`LICENSE`, `"license": "UNLICENSED"` in `package.json`). No open source license
+  file remains in the repository.
+- `THIRD_PARTY_NOTICES.md`: every npm package with its license (generated with
+  license-checker-rseidelsohn), plus MediaPipe, the EfficientDet-Lite0 model, the zxing wasm file,
+  the Geist fonts and the generated Workers types.
+- README: what was built during the hackathon and what is not built yet, TChenTChen as a
+  preexisting component, a table of the Meta models with the file that calls each one, development
+  tools, and a hackathon compliance checklist.
+- `docs/DEMO_SCRIPT.md`: the provenance sentence the demo video opens with, and the outline.
+- Checked the full git history: no API key or other secret was ever committed.
