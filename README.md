@@ -1,4 +1,4 @@
-# Hanout
+# SmallStore
 
 A small merchant in Morocco opens this PWA, presses one big record button, films their products
 and talks. The store builds itself on screen: each product is cut out of the video, prices and

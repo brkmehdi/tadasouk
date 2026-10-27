@@ -1,6 +1,8 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "hanout",
+	"name": "smallstore",
+	// Cloudflare account "Meta Hackaton"
+	"account_id": "d57fb66226e5bda27248ba2c4d62077a",
 	"main": ".open-next/worker.js",
 	"compatibility_date": "2026-10-20",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
@@ -11,16 +13,9 @@
 	"observability": { "enabled": true },
 	"vars": {
 		"MODEL_API_BASE": "https://api.meta.ai/v1",
-		"R2_BUCKET_NAME": "hanout-media",
+		"R2_BUCKET_NAME": "smallstore-media",
 		// Hard spending caps in US dollars, checked before every Meta Model API call.
 		"SESSION_CAP_USD": "0.50",
 		"DAILY_CAP_USD": "5.00"
-	},
-	"r2_buckets": [
-		{
-			// Raw capture videos, SAM cutouts, generated images. Browser uploads with signed URLs.
-			"binding": "MEDIA",
-			"bucket_name": "hanout-media"
-		}
-	]
+	}
 }

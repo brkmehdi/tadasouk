@@ -1,6 +1,6 @@
-// Hanout service worker: network first for pages, cache first for built assets,
+// SmallStore service worker: network first for pages, cache first for built assets,
 // so the record screen opens even on a weak connection.
-const CACHE = "hanout-v1";
+const CACHE = "smallstore-v1";
 const SHELL = ["/", "/capture"];
 
 self.addEventListener("install", (e) => {

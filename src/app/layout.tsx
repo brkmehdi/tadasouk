@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Hanout",
+  title: "SmallStore",
   description: "Film your products and talk. Your shop builds itself.",
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "Hanout" },
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "SmallStore" },
 };
 
 export const viewport: Viewport = {
