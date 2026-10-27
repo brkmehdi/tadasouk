@@ -16,7 +16,7 @@ type Props = {
   onClose: () => void;
   onEdit: (patch: Partial<Product>) => void;
   onRemoveImage: (imageId: string) => void;
-  onCover: (imageId: string) => void;
+  onView: (index: number) => void; // full-screen preview with the quality score
   onAttach: () => void;
   onBetterPhotos: () => void;
   onCheckPrice: () => void;
@@ -99,13 +99,13 @@ export default function ProductSheet(props: Props) {
 
       <div className="overflow-y-auto px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         {/* photos */}
-        <div className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1">
+        <div className="no-scrollbar -mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1">
           {p.images.map((im, i) => (
             <div key={im.id} className="relative w-[84px] shrink-0 snap-start">
               <button
                 type="button"
-                onClick={() => props.onCover(im.id)}
-                aria-label={i === 0 ? "Photo principale" : "Mettre en photo principale"}
+                onClick={() => props.onView(i)}
+                aria-label={i === 0 ? "Voir la photo principale" : "Voir la photo"}
                 className={`relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md bg-white ${
                   i === 0 ? "ring-2 ring-ink" : "ring-1 ring-black/10"
                 }`}
@@ -116,7 +116,7 @@ export default function ProductSheet(props: Props) {
               </button>
               {im.source !== "camera" && (
                 <span className="ui-badge absolute start-1 bottom-1 max-w-[76px] truncate">
-                  {im.source === "studio" ? "Studio" : im.source === "ai" ? "IA" : (im.credit ?? "Web")}
+                  {im.source === "studio" ? "Studio" : im.source === "ai" ? `IA${im.credit ? ` · ${im.credit}` : ""}` : (im.credit ?? "Web")}
                 </span>
               )}
               <button
@@ -277,7 +277,7 @@ function BarcodeLine({ code, onSave }: { code: string | null; onSave: (code: str
             placeholder="Code-barres"
             onBlur={(e) => save(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && save((e.target as HTMLInputElement).value)}
-            className="ui-input h-10 font-mono text-[15px] tracking-wider"
+            className="ui-input h-10 font-mono tracking-wider"
             aria-label="Code-barres"
           />
         </div>

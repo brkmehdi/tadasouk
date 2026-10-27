@@ -6,7 +6,7 @@ import { ghostCrop, grabKeyframe, locateProduct, segment, SegmentError, type Key
 import { createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
 import { emptyMetrics, report, type Metrics } from "@/lib/capture/metrics";
 import { innerRegion, signature, similarity, type Signature } from "@/lib/capture/similarity";
-import { betterPhotos, checkPrice, identify, studioPhoto, webPhotos } from "@/lib/capture/product-actions";
+import { betterPhotos, checkPrice, identify, scorePhoto, studioPhoto, webPhotos } from "@/lib/capture/product-actions";
 import { beep, shutter } from "@/lib/capture/sfx";
 import { readBarcode, warmUpBarcodes } from "@/lib/capture/barcode";
 import {
@@ -37,6 +37,7 @@ import ProductCard from "./ProductCard";
 import ProductSheet from "./ProductSheet";
 import ConfirmRemove from "./ConfirmRemove";
 import SellMode from "./SellMode";
+import PhotoViewer from "./PhotoViewer";
 
 type Phase = "idle" | "starting" | "recording" | "stopped";
 type Caption = { id: number; text: string; kind: "heard" | "pending" | "question" | "error" };
@@ -112,6 +113,7 @@ export default function CaptureScreen() {
   const [hold, setHold] = useState<{ x: number; y: number; n: number } | null>(null);
   const [dragging, setDragging] = useState(false); // no glide while the finger moves the frame
   const [mode, setMode] = useState<"capture" | "sell">("capture");
+  const [viewer, setViewer] = useState<{ productId: string; start: number } | null>(null);
   // The latency panel is for testing only: add ?debug to the address.
   const debug = useSyncExternalStore(
     noSubscribe,
@@ -164,8 +166,10 @@ export default function CaptureScreen() {
       if (effect.kind === "better_photos") {
         if (product.photos === "loading") return;
         setSession(patchProduct(sessionRef.current, product.id, { photos: "loading" }));
-        return betterPhotos(sid, product, (url) =>
-          setSession(addImage(sessionRef.current, product.id, { id: crypto.randomUUID(), url, source: "ai", pending: false })),
+        return betterPhotos(sid, product, (url, angle) =>
+          setSession(
+            addImage(sessionRef.current, product.id, { id: crypto.randomUUID(), url, source: "ai", pending: false, credit: angle }),
+          ),
         )
           .then(() => setSession(patchProduct(sessionRef.current, product.id, { photos: "idle" })))
           .catch((err: unknown) => {
@@ -235,6 +239,21 @@ export default function CaptureScreen() {
     },
     [setSession],
   );
+
+  // Quality score of one photo, asked when the merchant opens it in the preview.
+  const scoreImage = useCallback(
+    (imageId: string) => {
+      const p = sessionRef.current.products.find((x) => x.images.some((i) => i.id === imageId));
+      const image = p?.images.find((i) => i.id === imageId);
+      if (!p || !image || image.quality !== undefined) return;
+      setSession(patchImage(sessionRef.current, p.id, imageId, { quality: "loading" }));
+      scorePhoto(sessionIdRef.current || crypto.randomUUID(), image, p.name)
+        .then((q) => setSession(patchImage(sessionRef.current, p.id, imageId, { quality: q ?? "error" })))
+        .catch(() => setSession(patchImage(sessionRef.current, p.id, imageId, { quality: "error" })));
+    },
+    [setSession],
+  );
+  const closeViewer = useCallback(() => setViewer(null), []);
 
   // Real photos of the product from the shop pages the price research found.
   const runWebPhotos = useCallback(
@@ -837,6 +856,7 @@ export default function CaptureScreen() {
   const products = [...session.products].sort((a, b) => b.order - a.order);
   const openProduct = open ? session.products.find((p) => p.id === open.id && p.status !== "removing") : undefined;
   const confirmProduct = confirmId ? session.products.find((p) => p.id === confirmId) : undefined;
+  const viewerProduct = viewer ? session.products.find((p) => p.id === viewer.productId) : undefined;
 
   const removeNow = (id: string) => {
     setSession(removeProduct(sessionRef.current, id));
@@ -1142,7 +1162,7 @@ export default function CaptureScreen() {
           onClose={() => setOpen(null)}
           onEdit={(patch) => setSession(editProduct(sessionRef.current, openProduct.id, patch))}
           onRemoveImage={(imageId) => setSession(dropImage(sessionRef.current, openProduct.id, imageId))}
-          onCover={(imageId) => setSession(makeCover(sessionRef.current, openProduct.id, imageId))}
+          onView={(start) => setViewer({ productId: openProduct.id, start })}
           onAttach={() => {
             setOpen(null);
             onAttach(openProduct.id);
@@ -1165,6 +1185,17 @@ export default function CaptureScreen() {
       )}
 
       {debug && showMetrics && <MetricsPanel m={metricsView} upload={upload} onClose={() => setShowMetrics(false)} />}
+
+      {viewer && viewerProduct && (
+        <PhotoViewer
+          p={viewerProduct}
+          start={viewer.start}
+          onClose={closeViewer}
+          onCover={(imageId) => setSession(makeCover(sessionRef.current, viewer.productId, imageId))}
+          onRemove={(imageId) => setSession(dropImage(sessionRef.current, viewer.productId, imageId))}
+          onScore={scoreImage}
+        />
+      )}
 
       {mode === "sell" && (
         <SellMode

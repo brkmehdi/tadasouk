@@ -1,7 +1,7 @@
 // Browser side of the slow product actions: naming, studio photo, web photos, price check.
 
 import { onWhite, sseEvents } from "./cutout";
-import { type PriceCheck, type Product } from "./session";
+import { type PhotoQuality, type PriceCheck, type Product, type ProductImage } from "./session";
 
 async function loadImage(url: string) {
   const img = new Image();
@@ -60,23 +60,45 @@ export async function identify(sessionId: string, p: Product): Promise<Identity 
 }
 
 // Photos guided by web references of the product (muse-image's built-in search).
-export async function betterPhotos(sessionId: string, p: Product, onPhoto: (url: string) => void) {
+const ANGLES = [
+  { key: "three_quarter", label: "3/4" },
+  { key: "side", label: "Côté" },
+  { key: "back", label: "Dos" },
+] as const;
+
+// The product from three other angles, generated in parallel; each photo arrives on its own.
+export async function betterPhotos(sessionId: string, p: Product, onPhoto: (url: string, angle: string) => void) {
   const src = ownPhoto(p);
   if (!src) throw new Error("Pas encore de photo");
-  const res = await post("/api/better-photos", {
-    sessionId,
-    image: await toJpeg(src.url, 1024),
-    name: p.name,
-    label: p.label,
-    color: p.color,
-  });
-  if (!res.ok || !res.body) throw new Error(await errorMessage(res, "Photos indisponibles"));
-  let count = 0;
-  for await (const url of streamedImages(res)) {
-    onPhoto(url);
-    count++;
+  const image = await toJpeg(src.url, 1024);
+  const results = await Promise.allSettled(
+    ANGLES.map(async ({ key, label }) => {
+      const res = await post("/api/better-photos", { sessionId, image, angle: key, name: p.name, label: p.label, color: p.color });
+      if (!res.ok || !res.body) throw new Error(await errorMessage(res, "Photos indisponibles"));
+      let got = false;
+      for await (const url of streamedImages(res)) {
+        onPhoto(url, label);
+        got = true;
+      }
+      return got;
+    }),
+  );
+  if (!results.some((r) => r.status === "fulfilled" && r.value)) {
+    const failed = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+    throw failed?.reason instanceof Error ? failed.reason : new Error("Aucune photo générée");
   }
-  if (!count) throw new Error("Aucune photo générée");
+}
+
+// Quality score of one photo. Photos from other sites are sent by URL (they cannot be read
+// back from a canvas); the others as a JPEG.
+export async function scorePhoto(sessionId: string, image: ProductImage, name: string | null): Promise<PhotoQuality | null> {
+  const body =
+    image.source === "web"
+      ? { sessionId, imageUrl: image.url, name }
+      : { sessionId, image: await toJpeg(image.url, 768), name };
+  const res = await post("/api/photo-score", body);
+  if (!res.ok) return null;
+  return ((await res.json()) as { result: PhotoQuality }).result;
 }
 
 // Studio backdrop around the merchant's real photo. The real cutout is pasted back on top

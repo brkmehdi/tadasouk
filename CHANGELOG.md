@@ -92,6 +92,13 @@ Phase 0, live capture spike.
   outlined product, else the middle of the picture); ✕ on the left leaves the camera; "+" on
   the right still arms the next automatic capture. No more hint texts for "+" buttons.
 - "+" on each product card is back: the next photo goes to that product, then the mode ends.
+- AI photos from three angles (three-quarter, side, back), one muse-image request each in
+  parallel, using web references of the product for the sides the camera did not see; when an
+  angle makes no sense for the product, it is shown in a hand or in use. Badges "IA · Dos" etc.
+- Photo preview: tap a photo for a full-screen swipeable view with a quality score
+  (`/api/photo-score`: muse-spark-1.3 rates sharpness, light, framing, background, plus one
+  tip), "Mettre en principale" and "Supprimer". Web photos are scored by URL.
+- iPhone: fields stay at 16px so Safari no longer zooms the page when one is focused.
 - Live preview on Cloudflare Workers. Cache Components turned off: it hangs in the Workers runtime.
 - Latency panel on the record screen: first highlight, detector time per frame, capture to card,
   spoken command to UI update.

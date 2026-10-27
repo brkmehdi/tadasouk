@@ -167,7 +167,7 @@ export default function SellMode({
       </div>
 
       {/* products to tap (for those without a barcode) */}
-      <div className="flex shrink-0 gap-2 overflow-x-auto border-b border-black/10 px-4 py-3">
+      <div className="no-scrollbar flex shrink-0 gap-2 overflow-x-auto border-b border-black/10 px-4 py-3">
         {sellable.map((p) => {
           const img = cover(p);
           return (

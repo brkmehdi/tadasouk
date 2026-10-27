@@ -383,3 +383,21 @@ body {
     opacity: 0;
   }
 }
+
+/* iPhone zooms the whole page into any field whose text is under 16px, and the page then
+   looks wider than the screen. Every field stays at 16px on iOS. */
+@supports (-webkit-touch-callout: none) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Swipe strips (photos, products): no scrollbar, the content shows it scrolls. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

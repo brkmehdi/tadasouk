@@ -9,7 +9,17 @@ export type ProductImage = {
   source: "camera" | "studio" | "ai" | "web";
   pending: boolean; // camera: SAM cutout not back yet, url is the instant crop
   cutoutUrl?: string; // camera: transparent cutout, input of the studio photo
-  credit?: string; // web: the site it comes from
+  credit?: string; // web: the site it comes from; ai: the angle
+  quality?: PhotoQuality | "loading" | "error"; // scored when the merchant opens the photo
+};
+
+export type PhotoQuality = {
+  score: number; // 0-100
+  sharpness: number; // 0-10
+  lighting: number;
+  framing: number;
+  background: number;
+  note: string;
 };
 
 export type PriceCheck =
