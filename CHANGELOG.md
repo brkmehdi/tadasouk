@@ -81,6 +81,17 @@ Phase 0, live capture spike.
 - Photo research per product: 1 AI photo (badge IA) plus real photos from the shop pages the
   price research found (`/api/web-photos` reads their product image; badge shows the site).
 - The product tray no longer blocks touches on the right side of the video.
+- Barcodes: read on the phone (BarcodeDetector on Android, zxing-wasm 3.1.4 self-hosted
+  elsewhere) about every 0.7 s while filming. A barcode in view goes to the current product
+  with a bip; one that another product already has selects that product and drops a card just
+  made for it. Product sheet: the code shows as a small line under the name only when known,
+  otherwise a small "+ Code-barres" button.
+- Sale screen ("Vente", after filming): scan products or tap them, adjust quantities, total,
+  receipt sent on WhatsApp (wa.me link, Moroccan 06/07 numbers converted), stock lowered.
+- Camera controls: the middle button takes the photo once the camera is on (frame, else the
+  outlined product, else the middle of the picture); ✕ on the left leaves the camera; "+" on
+  the right still arms the next automatic capture. No more hint texts for "+" buttons.
+- "+" on each product card is back: the next photo goes to that product, then the mode ends.
 - Live preview on Cloudflare Workers. Cache Components turned off: it hangs in the Workers runtime.
 - Latency panel on the record screen: first highlight, detector time per frame, capture to card,
   spoken command to UI update.

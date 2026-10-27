@@ -7,13 +7,15 @@ type Props = {
   p: Product;
   current: boolean;
   flash: number; // changes when the camera shows this product again
+  attaching: boolean; // the next photo goes to this product
   onOpen: (id: string, from: DOMRect) => void;
   onRemove: (id: string) => void; // asks for confirmation first
+  onAttach: (id: string) => void;
 };
 
 // Frosted card in the tray over the video. Two fixed lines under the photo (name, price)
 // so a long name never pushes the card taller.
-export default function ProductCard({ p, current, flash, onOpen, onRemove }: Props) {
+export default function ProductCard({ p, current, flash, attaching, onOpen, onRemove, onAttach }: Props) {
   const img = cover(p);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -27,7 +29,7 @@ export default function ProductCard({ p, current, flash, onOpen, onRemove }: Pro
       ref={ref}
       data-card={p.id}
       className={`card-pop relative shrink-0 rounded-xl bg-white/15 p-1.5 shadow-lg ring-1 backdrop-blur-xl transition-all ${
-        current ? "ring-2 ring-white" : "ring-white/20"
+        attaching ? "ring-2 ring-brand" : current ? "ring-2 ring-white" : "ring-white/20"
       } ${p.status === "removing" ? "card-out" : ""}`}
     >
       <button
@@ -90,6 +92,20 @@ export default function ProductCard({ p, current, flash, onOpen, onRemove }: Pro
       </button>
 
       {flash > 0 && <span key={flash} className="card-flash pointer-events-none absolute inset-0 rounded-xl" />}
+      {/* add another photo of this product */}
+      <button
+        type="button"
+        onClick={() => onAttach(p.id)}
+        aria-label={`Ajouter une photo à ${displayName(p)}`}
+        aria-pressed={attaching}
+        className={`absolute end-2.5 bottom-[3.4rem] flex h-7 w-7 items-center justify-center rounded-full ring-1 shadow active:scale-90 ${
+          attaching ? "armed-pulse bg-brand text-white ring-white" : "bg-white text-ink ring-black/10"
+        }`}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden>
+          <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      </button>
       <button
         type="button"
         onClick={() => onRemove(p.id)}

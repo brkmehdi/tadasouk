@@ -7,7 +7,8 @@ import { createDetector, pickTarget, StillnessTrigger, type Box, type Target } f
 import { emptyMetrics, report, type Metrics } from "@/lib/capture/metrics";
 import { innerRegion, signature, similarity, type Signature } from "@/lib/capture/similarity";
 import { betterPhotos, checkPrice, identify, studioPhoto, webPhotos } from "@/lib/capture/product-actions";
-import { shutter } from "@/lib/capture/sfx";
+import { beep, shutter } from "@/lib/capture/sfx";
+import { readBarcode, warmUpBarcodes } from "@/lib/capture/barcode";
 import {
   addCaptured,
   addImage,
@@ -35,6 +36,7 @@ import { startVoice } from "@/lib/capture/voice";
 import ProductCard from "./ProductCard";
 import ProductSheet from "./ProductSheet";
 import ConfirmRemove from "./ConfirmRemove";
+import SellMode from "./SellMode";
 
 type Phase = "idle" | "starting" | "recording" | "stopped";
 type Caption = { id: number; text: string; kind: "heard" | "pending" | "question" | "error" };
@@ -46,6 +48,8 @@ const SAME_CROP = 0.74;
 const SAME_CUTOUT = 0.76;
 const HOLD_MS = 1000; // how long a finger rests on the video before the frame appears
 const MIN_FRAME = 56; // px
+const SCAN_EVERY_MS = 700; // barcode look-ups on the live video while filming
+const STORE_NAME = "Ma boutique"; // until the store settings exist (Phase 1)
 
 export default function CaptureScreen() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -76,6 +80,8 @@ export default function CaptureScreen() {
   // does not grab whatever passes while the merchant talks about the current product.
   const armedRef = useRef(true);
   const frameRef = useRef<Frame | null>(null);
+  const scanRef = useRef({ busy: false, at: 0 });
+  const lastCodeRef = useRef({ code: "", at: 0 });
   const frameTouchedRef = useRef(false);
   const gestureRef = useRef<{
     mode: null | "hold" | "size" | "move" | "nw" | "ne" | "sw" | "se";
@@ -105,6 +111,7 @@ export default function CaptureScreen() {
   const [frame, setFrame] = useState<Frame | null>(null);
   const [hold, setHold] = useState<{ x: number; y: number; n: number } | null>(null);
   const [dragging, setDragging] = useState(false); // no glide while the finger moves the frame
+  const [mode, setMode] = useState<"capture" | "sell">("capture");
   // The latency panel is for testing only: add ?debug to the address.
   const debug = useSyncExternalStore(
     noSubscribe,
@@ -319,7 +326,9 @@ export default function CaptureScreen() {
       const ghostUrl = ghostCrop(k);
       const id = attachTo?.id ?? crypto.randomUUID();
       sigsOf(id).crops.push(crop);
-      if (!attachTo) setArmed(false); // one product per "+"
+      // One product per "+" below; one extra photo per "+" on a card.
+      setArmed(false);
+      if (attachTo) setAttach(null);
       // Shutter: flash, click, and the shot flies from where it was taken into its card.
       shutter(audioCtxRef.current);
       setShutterN((n) => n + 1);
@@ -372,7 +381,45 @@ export default function CaptureScreen() {
         });
       return id;
     },
-    [bestMatch, caption, refreshMetrics, researchProduct, runIdentify, runStudio, selectExisting, setArmed, setSession],
+    [bestMatch, caption, refreshMetrics, researchProduct, runIdentify, runStudio, selectExisting, setArmed, setAttach, setSession],
+  );
+
+  // ---------- barcodes seen while filming ----------
+  // A barcode in view goes to the current product. If another product already has it, that
+  // product is selected instead, and a card just made for the same product is dropped.
+  const handleCode = useCallback(
+    (code: string) => {
+      const now = Date.now();
+      // After acting on a code, ignore it while it stays in view (no repeated bips).
+      if (code === lastCodeRef.current.code && now - lastCodeRef.current.at < 4000) {
+        lastCodeRef.current.at = now;
+        return;
+      }
+      const st = sessionRef.current;
+      const owner = st.products.find((p) => p.barcode === code && p.status !== "removing");
+      const cur = st.products.find((p) => p.id === st.currentId && p.status !== "removing");
+      if (owner) {
+        if (owner.id === cur?.id) return;
+        if (cur && !cur.barcode && now - cur.capturedAt < 8000) {
+          sigsRef.current.delete(cur.id);
+          setSession(patchProduct(sessionRef.current, cur.id, { status: "removing" }));
+          setTimeout(() => setSession(purgeRemoved(sessionRef.current)), 450);
+        }
+        lastCodeRef.current = { code, at: now };
+        selectExisting(owner.id, 1);
+        beep(audioCtxRef.current);
+        caption(`Déjà dans la boutique : ${displayName(owner)}`, "heard");
+        return;
+      }
+      if (cur && !cur.barcode) {
+        lastCodeRef.current = { code, at: now };
+        setSession(patchProduct(sessionRef.current, cur.id, { barcode: code }));
+        setFlash({ id: cur.id, n: now });
+        beep(audioCtxRef.current);
+        caption(`Code-barres ajouté : ${code}`, "heard");
+      }
+    },
+    [caption, selectExisting, setSession],
   );
 
   const centerBox = (v: HTMLVideoElement): Box => {
@@ -406,9 +453,17 @@ export default function CaptureScreen() {
         capture(grabKeyframe(video, target.box), target.label, "auto");
       }
     }
+    const sc = scanRef.current;
+    if (!sc.busy && now - sc.at >= SCAN_EVERY_MS) {
+      sc.busy = true;
+      sc.at = now;
+      readBarcode(video)
+        .then((code) => code && handleCode(code))
+        .finally(() => (sc.busy = false));
+    }
     const show = armedRef.current && !frameRef.current ? targetRef.current : null;
     draw(canvas, video, show, drawBoxRef, show ? triggerRef.current.progress(now) : 0);
-  }, [capture, refreshMetrics]);
+  }, [capture, handleCode, refreshMetrics]);
 
   // ---------- voice: chunk -> transcript -> (cue capture) -> agent -> UI ----------
   const handleChunk = useCallback(
@@ -543,6 +598,7 @@ export default function CaptureScreen() {
       caption(`Micro indisponible : ${err instanceof Error ? err.message : String(err)}`, "error");
     }
 
+    warmUpBarcodes();
     wakeLockRef.current = (await navigator.wakeLock?.request("screen").catch(() => null)) ?? null;
     setPhase("recording");
     const frame = () => {
@@ -641,6 +697,24 @@ export default function CaptureScreen() {
     if (box.w < 8 || box.h < 8) return;
     triggerRef.current.markManualCapture(box, performance.now());
     capture(grabKeyframe(v, box), null, "tap");
+  };
+
+  // The middle button once the camera is on: the frame if there is one, else the product the
+  // detector outlines, else whatever sits in the middle of the picture (the AI finds it).
+  const shoot = () => {
+    const v = videoRef.current;
+    if (!v || v.readyState < 2) return;
+    if (frameRef.current) return takeFrame();
+    const t = targetRef.current;
+    if (t) {
+      triggerRef.current.markManualCapture(t.box, performance.now());
+      capture(grabKeyframe(v, t.box), t.label, "tap");
+      return;
+    }
+    const side = Math.min(v.videoWidth, v.videoHeight) * 0.6;
+    const box: Box = { x: (v.videoWidth - side) / 2, y: (v.videoHeight - side) / 2, w: side, h: side };
+    triggerRef.current.markManualCapture(box, performance.now());
+    capture(grabKeyframe(v, box, { x: v.videoWidth / 2, y: v.videoHeight / 2 }), null, "tap");
   };
 
   // The AI looks for the whole product under the finger and the frame moves onto it.
@@ -762,7 +836,6 @@ export default function CaptureScreen() {
 
   const products = [...session.products].sort((a, b) => b.order - a.order);
   const openProduct = open ? session.products.find((p) => p.id === open.id && p.status !== "removing") : undefined;
-  const attachProduct = attachId ? session.products.find((p) => p.id === attachId) : undefined;
   const confirmProduct = confirmId ? session.products.find((p) => p.id === confirmId) : undefined;
 
   const removeNow = (id: string) => {
@@ -776,7 +849,12 @@ export default function CaptureScreen() {
     setArmed(false); // editing, not filming the next product
     setOpen({ id, from });
   };
-  const onAttach = (id: string) => setAttach(attachIdRef.current === id ? null : id);
+  // "+" on a card: the next photo (automatic or framed) is added to that product.
+  const onAttach = (id: string) => {
+    const on = attachIdRef.current !== id;
+    setAttach(on ? id : null);
+    setArmed(on);
+  };
 
   // One line of text at a time, centered above the record button. Most recent first:
   // what was just heard or answered, else the "next product" hint, else one question about
@@ -795,7 +873,6 @@ export default function CaptureScreen() {
           .map((p) => (p ? nextQuestion(p) : null))
           .find((q): q is Question => !!q && !dismissed.includes(keyOf(q))) ?? null);
   const latest = captions.at(-1) ?? null;
-  const showHint = phase === "recording" && armed && session.products.length > 0 && !latest;
   const openFromCard = (id: string) => {
     const el = document.querySelector(`[data-card="${id}"]`);
     if (el) onOpen(id, el.getBoundingClientRect());
@@ -909,6 +986,8 @@ export default function CaptureScreen() {
             flash={flash?.id === p.id ? flash.n : 0}
             onOpen={onOpen}
             onRemove={setConfirmId}
+            attaching={p.id === attachId}
+            onAttach={onAttach}
           />
         ))}
       </aside>
@@ -924,6 +1003,15 @@ export default function CaptureScreen() {
         {recording && detectorState === "failed" && (
           <span className="rounded-full bg-black/45 px-2.5 py-1 backdrop-blur">Touchez un produit pour le prendre</span>
         )}
+        {phase === "stopped" && session.products.some((p) => p.status === "active") && (
+          <button
+            type="button"
+            onClick={() => setMode("sell")}
+            className="ms-auto rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-ink shadow"
+          >
+            Vente
+          </button>
+        )}
         {debug && (
           <button
             onClick={() => setShowMetrics((v) => !v)}
@@ -935,19 +1023,6 @@ export default function CaptureScreen() {
           </button>
         )}
       </div>
-
-      {attachProduct && (
-        <div className="absolute inset-x-0 top-14 z-10 flex justify-center px-3">
-          <div className="flex items-center gap-3 rounded-full bg-white py-1 ps-4 pe-1 text-sm font-medium text-ink shadow-lg">
-            <span dir="auto" className="truncate">
-              Photos pour « {displayName(attachProduct)} »
-            </span>
-            <button type="button" onClick={() => setAttach(null)} className="ui-btn ui-btn-primary h-8 rounded-full px-3">
-              OK
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* shutter: white flash, then each shot flies into its card */}
       {shutterN > 0 && <div key={shutterN} className="shutter-flash pointer-events-none absolute inset-0 bg-white" />}
@@ -975,13 +1050,9 @@ export default function CaptureScreen() {
           </p>
         ) : frame ? (
           <p className="rounded-2xl bg-black/55 px-3.5 py-2 text-center text-sm text-white backdrop-blur">
-            Ajustez le cadre, puis touchez à côté pour prendre la photo
+            Ajustez le cadre, puis appuyez sur le bouton
           </p>
-        ) : showHint ? (
-          <p className="rounded-2xl bg-black/45 px-3.5 py-2 text-center text-sm text-white/90 backdrop-blur">
-            Montrez le produit suivant
-          </p>
-        ) : question ? (
+        ) : question && !armed ? (
           <div className="pointer-events-auto flex max-w-[min(92vw,26rem)] items-center gap-2 rounded-2xl bg-white py-1.5 ps-3.5 pe-1.5 text-ink shadow-lg">
             <button type="button" onClick={() => openFromCard(question.productId)} className="min-w-0 flex-1 py-0.5">
               <p dir="auto" className="line-clamp-2 text-center text-sm leading-snug font-medium">
@@ -1011,13 +1082,26 @@ export default function CaptureScreen() {
         ) : null}
       </div>
 
-      {/* controls: small record button with echoes while the merchant talks, "+" for the next product */}
+      {/* controls: exit on the left, the button in the middle starts the camera then takes
+          photos (echoes while the merchant talks), "+" for the next product on the right */}
       <div className="absolute inset-x-0 bottom-0 flex h-[calc(5.5rem+env(safe-area-inset-bottom))] items-start justify-center pt-3">
+        {recording && (
+          <button
+            type="button"
+            onClick={stop}
+            aria-label="Terminer"
+            className="absolute start-5 top-4 flex h-12 w-12 items-center justify-center rounded-full bg-white/20 text-white ring-1 ring-white/40 backdrop-blur"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+              <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </button>
+        )}
         <button
-          onClick={recording ? stop : start}
+          onClick={recording ? shoot : start}
           disabled={phase === "starting"}
-          aria-label={recording ? "Arrêter" : "Filmer"}
-          className={`relative flex h-16 w-16 items-center justify-center rounded-full ring-[3px] ${
+          aria-label={recording ? "Prendre la photo" : "Filmer"}
+          className={`relative flex h-16 w-16 items-center justify-center rounded-full ring-[3px] active:scale-95 ${
             phase === "idle" ? "ring-ink/80" : "ring-white"
           }`}
         >
@@ -1029,7 +1113,7 @@ export default function CaptureScreen() {
             </>
           )}
           <span
-            className={`block bg-red-500 transition-all duration-200 ${recording ? "h-6 w-6 rounded-md" : "h-[52px] w-[52px] rounded-full"}`}
+            className={`block h-[52px] w-[52px] rounded-full transition-colors duration-200 ${recording ? "bg-white" : "bg-red-500"}`}
           />
         </button>
         {recording && session.products.length > 0 && (
@@ -1059,7 +1143,10 @@ export default function CaptureScreen() {
           onEdit={(patch) => setSession(editProduct(sessionRef.current, openProduct.id, patch))}
           onRemoveImage={(imageId) => setSession(dropImage(sessionRef.current, openProduct.id, imageId))}
           onCover={(imageId) => setSession(makeCover(sessionRef.current, openProduct.id, imageId))}
-          onAttach={() => onAttach(openProduct.id)}
+          onAttach={() => {
+            setOpen(null);
+            onAttach(openProduct.id);
+          }}
           onBetterPhotos={() => runEffect({ kind: "better_photos", productId: openProduct.id })}
           onCheckPrice={() => runEffect({ kind: "check_price", productId: openProduct.id })}
           onRemove={() => setConfirmId(openProduct.id)}
@@ -1078,6 +1165,24 @@ export default function CaptureScreen() {
       )}
 
       {debug && showMetrics && <MetricsPanel m={metricsView} upload={upload} onClose={() => setShowMetrics(false)} />}
+
+      {mode === "sell" && (
+        <SellMode
+          products={session.products.filter((p) => p.status === "active")}
+          currency={session.currency}
+          storeName={STORE_NAME}
+          onExit={() => setMode("capture")}
+          onSold={(lines) => {
+            // Lower the stock of the products that have one.
+            let next = sessionRef.current;
+            for (const l of lines) {
+              const p = next.products.find((x) => x.id === l.productId);
+              if (p?.quantity != null) next = patchProduct(next, p.id, { quantity: Math.max(0, p.quantity - l.qty) });
+            }
+            setSession(next);
+          }}
+        />
+      )}
     </main>
   );
 }

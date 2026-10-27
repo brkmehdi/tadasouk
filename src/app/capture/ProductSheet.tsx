@@ -135,12 +135,13 @@ export default function ProductSheet(props: Props) {
           <button
             type="button"
             onClick={props.onAttach}
+            aria-label="Ajouter une photo"
             className={`flex aspect-square w-[84px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-md text-xs font-medium ${
               attaching ? "bg-brand text-white" : "bg-soft text-ink-2"
             }`}
           >
             <span className="text-xl leading-none">+</span>
-            {attaching ? "Filmez-le" : "Photo"}
+            Photo
           </button>
         </div>
 
@@ -158,6 +159,7 @@ export default function ProductSheet(props: Props) {
             onBlur={(e) => e.target.value.trim() !== (p.name ?? "") && onEdit({ name: e.target.value.trim() || null })}
             className="ui-input"
           />
+          <BarcodeLine key={`bc-${p.id}-${p.barcode}`} code={p.barcode} onSave={(barcode) => onEdit({ barcode })} />
         </div>
 
         {/* price and stock */}
@@ -251,6 +253,52 @@ export default function ProductSheet(props: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+// The barcode stays out of the way: a small line under the name when one was read, or a
+// small "+ Code-barres" button. Tapping opens the field; showing the barcode to the camera
+// while the sheet is open fills it too.
+function BarcodeLine({ code, onSave }: { code: string | null; onSave: (code: string | null) => void }) {
+  const [editing, setEditing] = useState(false);
+  const save = (v: string) => {
+    const c = v.replace(/s+/g, "");
+    if (c !== (code ?? "")) onSave(c || null);
+    setEditing(false);
+  };
+  if (editing) {
+    return (
+      <div className="mt-2">
+        <div className="flex gap-2">
+          <input
+            autoFocus
+            inputMode="numeric"
+            defaultValue={code ?? ""}
+            placeholder="Code-barres"
+            onBlur={(e) => save(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && save((e.target as HTMLInputElement).value)}
+            className="ui-input h-10 font-mono text-[15px] tracking-wider"
+            aria-label="Code-barres"
+          />
+        </div>
+        <p className="mt-1 text-xs text-ink-3">Ou montrez le code-barres à la caméra.</p>
+      </div>
+    );
+  }
+  return code ? (
+    <div className="mt-1.5 flex items-center gap-2 text-[13px] text-ink-3">
+      <svg width="16" height="12" viewBox="0 0 16 12" aria-hidden className="shrink-0 text-ink-2">
+        <path d="M1 0v12M3 0v12M4.5 0v12M7 0v12M9 0v12M10 0v12M12.5 0v12M15 0v12" stroke="currentColor" strokeWidth="1" />
+      </svg>
+      <span className="font-mono tracking-wider text-ink-2">{code}</span>
+      <button type="button" onClick={() => setEditing(true)} className="ms-auto font-medium text-brand">
+        Modifier
+      </button>
+    </div>
+  ) : (
+    <button type="button" onClick={() => setEditing(true)} className="mt-1.5 text-[13px] font-medium text-brand">
+      + Code-barres
+    </button>
   );
 }
 

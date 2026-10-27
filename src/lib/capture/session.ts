@@ -40,6 +40,7 @@ export type Product = {
   aiFilled: { name: boolean; description: boolean };
   nameAr: string | null;
   category: string | null;
+  barcode: string | null; // read from the camera or typed; also used to sell by scanning
   identify: "idle" | "loading" | "done" | "failed"; // AI naming from the photo
   research: "idle" | "running" | "done"; // studio photos, web photos, prices once the product is done
   label: string | null; // what the on-device detector called it, e.g. "bottle"
@@ -173,6 +174,7 @@ function blank(state: SessionState, id: string): Product {
     aiFilled: { name: false, description: false },
     nameAr: null,
     category: null,
+    barcode: null,
     identify: "idle",
     research: "idle",
     label: null,
@@ -278,6 +280,7 @@ function undo(state: SessionState): SessionState {
       identify: now.identify,
       research: now.research,
       nameAr: now.nameAr,
+      barcode: now.barcode,
       aiFilled: now.aiFilled,
       category: now.category,
       status: now.status === "removing" ? "active" : now.status,

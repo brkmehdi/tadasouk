@@ -355,3 +355,31 @@ body {
     width 0.25s ease,
     height 0.25s ease;
 }
+
+/* Sale screen: a line pops when its product is scanned again; notices slide in. */
+.line-in {
+  animation: line-in 0.35s cubic-bezier(0.18, 1.25, 0.4, 1);
+}
+@keyframes line-in {
+  from {
+    transform: scale(0.96);
+    background: rgba(0, 116, 212, 0.08);
+  }
+}
+.toast {
+  animation: toast 2.6s ease both;
+}
+@keyframes toast {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  10%,
+  80% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
