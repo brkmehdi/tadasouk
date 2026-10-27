@@ -92,3 +92,18 @@ body {
     animation: none;
   }
 }
+
+/* The camera shows a product already in the tray: its card pulses instead of a copy appearing. */
+.card-flash {
+  animation: card-flash 900ms ease-out both;
+}
+@keyframes card-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgb(252 211 77 / 0.95);
+    background: rgb(252 211 77 / 0.35);
+  }
+  100% {
+    box-shadow: 0 0 0 14px rgb(252 211 77 / 0);
+    background: transparent;
+  }
+}

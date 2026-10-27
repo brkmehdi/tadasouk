@@ -36,5 +36,10 @@ Phase 0, live capture spike.
 - "Is my price competitive?" (button or voice): `muse-spark-1.3` with web search from Morocco returns
   the lowest, average and highest price found, a verdict and the sources.
 - New agent tools: set_description, find_better_photos, check_price.
+- Same product shown twice no longer makes a second card: a visual fingerprint (hue histogram
+  plus difference hash, robust to light and tilt) is checked on the crop before SAM and on the
+  cutout after it. The existing card pulses and becomes the current product instead. A tap
+  still forces a capture.
+- Live preview on Cloudflare Workers. Cache Components turned off: it hangs in the Workers runtime.
 - Latency panel on the record screen: first highlight, detector time per frame, capture to card,
   spoken command to UI update.

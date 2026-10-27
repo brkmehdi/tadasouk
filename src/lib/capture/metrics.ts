@@ -10,10 +10,12 @@ export type Metrics = {
   detectMs: number[];
   capture: Sample[];
   command: Sample[];
+  dupes: number[]; // similarity scores of captures recognized as a product already in the tray
+  lastSimilarity: number | null; // best score of the latest auto capture, for tuning
 };
 
 export function emptyMetrics(): Metrics {
-  return { firstHighlightMs: null, detectMs: [], capture: [], command: [] };
+  return { firstHighlightMs: null, detectMs: [], capture: [], command: [], dupes: [], lastSimilarity: null };
 }
 
 export function pct(values: number[], p: number) {
@@ -39,5 +41,7 @@ export function report(m: Metrics) {
     commandP95: pct(cmd, 95),
     asrP50: pct(part(m.command, "asr"), 50),
     agentP50: pct(part(m.command, "agent"), 50),
+    dupes: m.dupes.length,
+    lastSimilarity: m.lastSimilarity,
   };
 }

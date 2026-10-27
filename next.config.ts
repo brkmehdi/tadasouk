@@ -2,8 +2,7 @@ import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 const nextConfig: NextConfig = {
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Cache Components hang in the Workers runtime (setTimeout semantics), so it stays off.
   turbopack: {
     root: process.cwd(),
     rules: {

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ghostCrop, grabKeyframe, segment, SegmentError, type Keyframe } from "@/lib/capture/cutout";
 import { createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
 import { emptyMetrics, report, type Metrics } from "@/lib/capture/metrics";
+import { innerRegion, signature, similarity, type Signature } from "@/lib/capture/similarity";
 import { betterPhotos, checkPrice } from "@/lib/capture/product-actions";
 import {
   addCaptured,
@@ -33,6 +34,9 @@ type Caption = { id: number; text: string; kind: "heard" | "pending" | "question
 
 const CUE = /\b(this one|that one|hada|hadi|hadou|celui[- ]ci|celle[- ]ci|ceci)\b|هادا|هادي|هذا|هذه/i;
 const DETECT_EVERY_MS = 66;
+// Similarity above which a capture counts as a product already in the tray (see similarity.ts).
+const SAME_CROP = 0.74;
+const SAME_CUTOUT = 0.76;
 
 export default function CaptureScreen() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -56,6 +60,7 @@ export default function CaptureScreen() {
   const loopRef = useRef(0);
   const lastDetectRef = useRef(0);
   const attachIdRef = useRef<string | null>(null);
+  const sigsRef = useRef(new Map<string, { crops: Signature[]; cutouts: Signature[] }>());
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [session, setSessionState] = useState<SessionState>(initialSession);
@@ -67,6 +72,7 @@ export default function CaptureScreen() {
   const [upload, setUpload] = useState<string | null>(null);
   const [attachId, setAttachIdState] = useState<string | null>(null);
   const [open, setOpen] = useState<{ id: string; from: DOMRect } | null>(null);
+  const [flash, setFlash] = useState<{ id: string; n: number } | null>(null);
 
   const setSession = useCallback((next: SessionState) => {
     sessionRef.current = next;
@@ -91,16 +97,61 @@ export default function CaptureScreen() {
   }, []);
 
   // ---------- capture: keyframe -> instant card -> SAM cutout ----------
+  // Showing a product that is already in the tray selects its card instead of adding a copy.
+  // Checked twice: on the raw crop before calling SAM (saves the call), then on the precise
+  // cutout (catches what the crop missed). A tap always captures.
+  const bestMatch = useCallback((sig: Signature, kind: "crops" | "cutouts", exclude?: string) => {
+    let best: { id: string; score: number } | null = null;
+    for (const p of sessionRef.current.products) {
+      if (p.id === exclude || p.status === "removing") continue;
+      for (const other of sigsRef.current.get(p.id)?.[kind] ?? []) {
+        const score = similarity(sig, other);
+        if (!best || score > best.score) best = { id: p.id, score };
+      }
+    }
+    return best;
+  }, []);
+
+  const sigsOf = (id: string) => {
+    let e = sigsRef.current.get(id);
+    if (!e) sigsRef.current.set(id, (e = { crops: [], cutouts: [] }));
+    return e;
+  };
+
+  const selectExisting = useCallback(
+    (id: string, score: number) => {
+      setSession({ ...sessionRef.current, currentId: id });
+      setFlash({ id, n: Date.now() });
+      navigator.vibrate?.([15, 40, 15]);
+      metricsRef.current.dupes.push(score);
+      refreshMetrics();
+    },
+    [refreshMetrics, setSession],
+  );
+
   const capture = useCallback(
-    (k: Keyframe, label: string | null) => {
+    (k: Keyframe, label: string | null, mode: "auto" | "voice" | "tap") => {
       const triggeredAt = performance.now();
       lastCaptureAtRef.current = triggeredAt;
-      const imageId = crypto.randomUUID();
-      const ghostUrl = ghostCrop(k);
+      const crop = signature(k.canvas, innerRegion(k.box));
       const attachTo = sessionRef.current.products.find(
         (p) => p.id === attachIdRef.current && p.status !== "removing",
       );
+      const dedupe = !attachTo && mode !== "tap";
+      if (dedupe) {
+        const match = bestMatch(crop, "crops");
+        metricsRef.current.lastSimilarity = match?.score ?? null;
+        if (match && match.score >= SAME_CROP) {
+          sigsOf(match.id).crops.push(crop); // one more view of it for next time
+          selectExisting(match.id, match.score);
+          return match.id;
+        }
+      }
+
+      const imageId = crypto.randomUUID();
+      const ghostUrl = ghostCrop(k);
       const id = attachTo?.id ?? crypto.randomUUID();
+      sigsOf(id).crops.push(crop);
       setSession(
         attachTo
           ? addImage(sessionRef.current, id, { id: imageId, url: ghostUrl, source: "camera", pending: true })
@@ -110,6 +161,19 @@ export default function CaptureScreen() {
       segment(sessionIdRef.current, k)
         .then((cut) => {
           const ms = performance.now() - triggeredAt;
+          if (cut && dedupe) {
+            const match = bestMatch(cut.sig, "cutouts", id);
+            if (match && match.score >= SAME_CUTOUT) {
+              // A copy slipped through: drop the new card, keep the original.
+              sigsOf(match.id).crops.push(crop);
+              sigsRef.current.delete(id);
+              setSession(patchProduct(sessionRef.current, id, { status: "removing" }));
+              setTimeout(() => setSession(purgeRemoved(sessionRef.current)), 450);
+              selectExisting(match.id, match.score);
+              return;
+            }
+          }
+          if (cut) sigsOf(id).cutouts.push(cut.sig);
           let next = patchImage(sessionRef.current, id, imageId, cut ? { url: cut.url, pending: false } : { pending: false });
           const product = next.products.find((p) => p.id === id);
           if (cut && product && !product.color) next = patchProduct(next, id, { color: cut.color });
@@ -123,7 +187,7 @@ export default function CaptureScreen() {
         });
       return id;
     },
-    [caption, refreshMetrics, setSession],
+    [bestMatch, caption, refreshMetrics, selectExisting, setSession],
   );
 
   // ---------- slow product actions: AI photos, price check ----------
@@ -191,7 +255,7 @@ export default function CaptureScreen() {
         refreshMetrics();
       }
       if (triggerRef.current.update(target, video.videoWidth, video.videoHeight, now) && target) {
-        capture(grabKeyframe(video, target.box), target.label);
+        capture(grabKeyframe(video, target.box), target.label, "auto");
       }
     }
     draw(canvas, video, targetRef.current, drawBoxRef, triggerRef.current.progress(now));
@@ -223,7 +287,7 @@ export default function CaptureScreen() {
           // "this one" / "hada" captures the frame from when the merchant started talking,
           // unless the held-still trigger already took one during this sentence.
           if (CUE.test(text) && snap && lastCaptureAtRef.current < info.startedAt - 1500) {
-            capture(snap, label);
+            capture(snap, label, "voice");
           }
 
           const ar = await fetch("/api/agent", {
@@ -273,6 +337,7 @@ export default function CaptureScreen() {
     setSession(initialSession(sessionRef.current.currency));
     setAttach(null);
     setOpen(null);
+    sigsRef.current.clear();
     setCaptions([]);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -372,7 +437,7 @@ export default function CaptureScreen() {
           h: s,
         };
     triggerRef.current.markManualCapture(box, performance.now());
-    capture(grabKeyframe(v, box), inside ? t.label : null);
+    capture(grabKeyframe(v, box), inside ? t.label : null, "tap");
   };
 
   const products = [...session.products].sort((a, b) => b.order - a.order);
@@ -422,6 +487,7 @@ export default function CaptureScreen() {
             p={p}
             current={p.id === session.currentId}
             attaching={p.id === attachId}
+            flash={flash?.id === p.id ? flash.n : 0}
             onOpen={onOpen}
             onRemove={onRemove}
             onAttach={onAttach}
@@ -542,6 +608,7 @@ function MetricsPanel({
     [`Command → UI p50 · p95 (n=${m.commandN})`, `${s(m.commandP50)} · ${s(m.commandP95)}`, "< 3000"],
     ["  transcription p50", s(m.asrP50), ""],
     ["  agent p50", s(m.agentP50), ""],
+    [`Same product shown again (n=${m.dupes})`, m.lastSimilarity == null ? "–" : `last ${m.lastSimilarity.toFixed(2)}`, ""],
   ];
   return (
     <div className="absolute inset-x-3 top-12 z-10 rounded-2xl bg-black/80 p-3 font-mono text-[11px] backdrop-blur">

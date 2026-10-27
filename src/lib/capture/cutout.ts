@@ -3,6 +3,7 @@
 
 import { decodeMaskToRaster, parseImageStream, recordsOfKind } from "@meta-sam/parser";
 import type { Box } from "./detector";
+import { signature, type Signature } from "./similarity";
 
 const MAX_SIDE = 1024;
 
@@ -36,7 +37,7 @@ export function ghostCrop(k: Keyframe): string {
   return c.toDataURL("image/jpeg", 0.7);
 }
 
-export type Cutout = { url: string; blob: Blob; color: string | null; samMs: number };
+export type Cutout = { url: string; blob: Blob; color: string | null; samMs: number; sig: Signature };
 
 export class SegmentError extends Error {
   constructor(
@@ -131,6 +132,7 @@ async function composite(
     }
   }
   ctx.putImageData(img, 0, 0);
+  const sig = signature(out, { x: 0, y: 0, w: bw, h: bh }, true);
   const blob = await new Promise<Blob>((resolve, reject) =>
     out.toBlob((bl) => (bl ? resolve(bl) : reject(new Error("toBlob failed"))), "image/png"),
   );
@@ -139,6 +141,7 @@ async function composite(
     blob,
     color: n ? colorName(r / n, g / n, b / n) : null,
     samMs,
+    sig,
   };
 }
 

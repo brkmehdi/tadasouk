@@ -1,20 +1,27 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { cover, displayName, type Product } from "@/lib/capture/session";
 
 type Props = {
   p: Product;
   current: boolean;
   attaching: boolean;
+  flash: number; // changes when the camera shows this product again
   onOpen: (id: string, from: DOMRect) => void;
   onRemove: (id: string) => void;
   onAttach: (id: string) => void;
 };
 
-export default function ProductCard({ p, current, attaching, onOpen, onRemove, onAttach }: Props) {
+export default function ProductCard({ p, current, attaching, flash, onOpen, onRemove, onAttach }: Props) {
   const img = cover(p);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (flash) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [flash]);
   return (
     <div
+      ref={ref}
       className={`card-in relative shrink-0 rounded-2xl bg-white/10 p-1.5 backdrop-blur-md transition-all ${
         attaching ? "ring-2 ring-sky-400" : current ? "ring-2 ring-amber-300" : ""
       } ${p.status === "removing" ? "card-out" : ""}`}
@@ -68,6 +75,7 @@ export default function ProductCard({ p, current, attaching, onOpen, onRemove, o
         </div>
       </button>
 
+      {flash > 0 && <span key={flash} className="card-flash pointer-events-none absolute inset-0 rounded-2xl" />}
       {/* delete */}
       <button
         type="button"
