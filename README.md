@@ -94,9 +94,10 @@ which only draws the live outline and decides when to capture; it sends nothing 
 ## How it works
 
 The Cloudflare Worker stays light: it adds the API key, checks the spending caps and passes
-responses through. Frame sampling, mask decoding and compositing happen on the phone. Raw videos
-are meant to go from the phone straight to R2 through signed URLs and be deleted after 7 days
-(the R2 bucket is not set up yet).
+responses through. Frame sampling, mask decoding and compositing happen on the phone. When the merchant
+stops filming, the raw video goes to R2 in 8 MiB parts through `/api/captures` (signed-in
+merchants only, under a key that carries their user id). The platform owner watches or downloads
+the videos at `/admin/videos`; they are kept until the owner decides otherwise.
 
 ## Design kit
 
@@ -131,7 +132,6 @@ Other commands: `npm run preview` (production build in the Workers runtime), `np
 | Name | Where | What |
 |---|---|---|
 | `MODEL_API_KEY` | secret | Meta Model API key. Server only. |
-| `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | secret | Signs short-lived upload URLs for the raw videos. |
 | `AI_FREE_DAILY_USD`, `DAILY_CAP_USD` | `wrangler.jsonc` vars | Free AI allowance per account per day, and the platform's daily cap. |
 | `DATABASE_URL` | `.dev.vars` (local) | Postgres for the server; in production the `HYPERDRIVE` binding. |
 | `SEND_SMS_HOOK_SECRET` | secret | Verifies the phone codes Supabase Auth hands to `/api/auth/sms-hook`. |

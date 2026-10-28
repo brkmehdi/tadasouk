@@ -1,6 +1,7 @@
 // The platform owner's pages and actions. An account is admin when its profile says so (set by
 // hand in the database, never from a browser: profiles.role cannot be updated by its owner).
 
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { currentUser } from "./auth";
 import { withDb } from "./db";
 
@@ -42,4 +43,57 @@ export function listAccounts() {
       left join public.ai_wallets w on w.user_id = p.id
       order by p.created_at desc`,
   );
+}
+
+// Filming sessions kept in R2 by /api/captures, newest first, with the account that filmed them.
+export type Capture = {
+  key: string;
+  uploaded: string;
+  bytes: number;
+  seconds: number;
+  type: string;
+  login: string | null;
+  store: string | null;
+  slug: string | null;
+};
+
+export async function listCaptures(): Promise<Capture[]> {
+  const media = getCloudflareContext().env.MEDIA;
+  const objects: R2Object[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await media.list({ prefix: "captures/", cursor, include: ["httpMetadata", "customMetadata"] });
+    objects.push(...page.objects);
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  const owners = [...new Set(objects.map((o) => o.key.split("/")[2]).filter((id) => /^[0-9a-f-]{36}$/.test(id)))];
+  const who = new Map(
+    owners.length
+      ? (
+          await withDb(
+            (sql) => sql<{ id: string; login: string; store: string | null; slug: string | null }[]>`
+              select p.id, coalesce(p.email, '+' || p.phone, '?') as login, s.name as store, s.slug
+              from public.profiles p left join public.stores s on s.owner_id = p.id
+              where p.id in ${sql(owners)}`,
+          )
+        ).map((r) => [r.id, r])
+      : [],
+  );
+
+  return objects
+    .sort((a, b) => b.uploaded.getTime() - a.uploaded.getTime())
+    .map((o) => {
+      const owner = who.get(o.key.split("/")[2]);
+      return {
+        key: o.key,
+        uploaded: o.uploaded.toISOString(),
+        bytes: o.size,
+        seconds: Number(o.customMetadata?.seconds ?? 0),
+        type: o.httpMetadata?.contentType ?? "video/webm",
+        login: owner?.login ?? null,
+        store: owner?.store ?? null,
+        slug: owner?.slug ?? null,
+      };
+    });
 }

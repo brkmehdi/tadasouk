@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Account } from "@/lib/server/admin";
@@ -26,7 +27,12 @@ export default function Accounts({ accounts }: { accounts: Account[] }) {
 
   return (
     <main className="mx-auto min-h-dvh max-w-5xl bg-white px-5 py-6 text-ink">
-      <h1 className="text-lg font-semibold tracking-[-0.01em]">Comptes</h1>
+      <div className="flex items-baseline gap-4">
+        <h1 className="text-lg font-semibold tracking-[-0.01em]">Comptes</h1>
+        <Link href="/admin/videos" className="text-sm font-medium text-brand">
+          Vidéos
+        </Link>
+      </div>
       <p className="mt-1 text-sm text-ink-3">
         {accounts.length} comptes · {pending} en attente d&apos;activation. Les 10 premiers ont reçu 2 $ d&apos;IA à
         l&apos;inscription ; activer un compte lui donne les mêmes 2 $.

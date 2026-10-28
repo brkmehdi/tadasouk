@@ -193,3 +193,7 @@ Phase 0, live capture spike.
   phone, remove, choose the cover), preview and WhatsApp share in the product editor; store look
   in Settings (hero photo, AI hero, tagline) and "Voir ma boutique" in the header.
 - 27 database tests (welcome credit, activation, order pricing, drafts not orderable).
+- Filming videos are kept: when the merchant stops the camera, the raw video goes to R2 in 8 MiB
+  parts through `/api/captures` (signed-in merchants only; replaces the signed-URL route, which
+  needed storage keys and let anyone upload). `/admin/videos` lists them with the account, store,
+  length and size, plays them (with seeking) and downloads them.

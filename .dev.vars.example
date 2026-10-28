@@ -4,12 +4,6 @@
 # Meta Model API key (dev.meta.ai). Server only, never sent to the browser.
 MODEL_API_KEY=
 
-# R2 S3-compatible credentials, used only to sign short-lived upload URLs.
-# Dashboard > R2 > Manage API tokens > Create token (Object Read & Write, this bucket only).
-R2_ACCOUNT_ID=
-R2_ACCESS_KEY_ID=
-R2_SECRET_ACCESS_KEY=
-
 # Postgres for the server in `npm run dev`: the local Supabase stack (`npx supabase start`).
 # In production the HYPERDRIVE binding in wrangler.jsonc replaces it.
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres

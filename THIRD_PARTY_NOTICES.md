@@ -17,7 +17,7 @@ Made in this project, no third party license: the app icons (`src/app/icon.svg`,
 `public/icon.svg`, `design-kit/assets/icon.svg`, hand-written SVG) and the shutter and beep
 sounds (synthesized in code with the Web Audio API in `src/lib/capture/sfx.ts`, no audio file).
 
-## npm packages used by the app (production dependency tree, 326 packages)
+## npm packages used by the app (production dependency tree, 325 packages)
 
 Generated with `npx license-checker-rseidelsohn@4 --production --excludePrivatePackages` on
 2026-10-27. Most of these come from the OpenNext Cloudflare adapter and are used at
@@ -167,7 +167,6 @@ support data under CC-BY-4.0.
 | ansi-styles | 6.2.3 | MIT | https://github.com/chalk/ansi-styles |
 | array-timsort | 1.0.3 | MIT | https://github.com/kaelzhang/node-array-timsort |
 | asynckit | 0.4.0 | MIT | https://github.com/alexindigo/asynckit |
-| aws4fetch | 1.0.20 | MIT | https://github.com/mhart/aws4fetch |
 | balanced-match | 1.0.2 | MIT | https://github.com/juliangruber/balanced-match |
 | balanced-match | 4.0.4 | MIT | https://github.com/juliangruber/balanced-match |
 | baseline-browser-mapping | 2.11.33 | Apache-2.0 | https://github.com/web-platform-dx/baseline-browser-mapping |

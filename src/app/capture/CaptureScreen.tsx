@@ -634,7 +634,13 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
       const chunks: Blob[] = [];
       const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 2_500_000 });
       rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-      rec.onstop = () => uploadVideo(new Blob(chunks, { type: rec.mimeType }), sessionIdRef.current, setUpload);
+      rec.onstop = () =>
+        uploadVideo(
+          new Blob(chunks, { type: rec.mimeType }),
+          sessionIdRef.current,
+          (performance.now() - startedAtRef.current) / 1000,
+          setUpload,
+        );
       rec.start(1000);
       recorderRef.current = rec;
     } catch {
@@ -1307,24 +1313,35 @@ function draw(
   }
 }
 
-// ---------- raw video -> R2 (signed URL, straight from the browser) ----------
-async function uploadVideo(blob: Blob, sessionId: string, onStatus: (s: string) => void) {
+// ---------- raw video -> R2 (in parts through /api/captures, watched in /admin/videos) ----------
+async function uploadVideo(blob: Blob, sessionId: string, seconds: number, onStatus: (s: string) => void) {
   const mb = (blob.size / 1e6).toFixed(1);
+  if (!blob.size) return onStatus("nothing recorded");
+  const post = (body: object) =>
+    fetch("/api/captures", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  let started: { key: string; uploadId: string; partBytes: number } | null = null;
   try {
     onStatus(`${mb} MB, uploading…`);
-    const res = await fetch("/api/upload-url", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, contentType: blob.type }),
-    });
-    if (res.status === 503) {
-      onStatus(`${mb} MB, kept on the phone (R2 not configured yet)`);
-      return;
+    const res = await post({ action: "start", sessionId, contentType: blob.type, bytes: blob.size, seconds });
+    if (!res.ok) throw new Error(`start ${res.status}`);
+    started = (await res.json()) as { key: string; uploadId: string; partBytes: number };
+    const { key, uploadId, partBytes } = started;
+    const parts: { partNumber: number; etag: string }[] = [];
+    for (let n = 1, at = 0; at < blob.size; n++, at += partBytes) {
+      const q = new URLSearchParams({ key, uploadId, part: String(n) });
+      let put: Response | null = null;
+      for (let tries = 0; tries < 3 && !put?.ok; tries++) {
+        put = await fetch(`/api/captures?${q}`, { method: "PUT", body: blob.slice(at, at + partBytes) }).catch(() => null);
+      }
+      if (!put?.ok) throw new Error(`part ${n} ${put?.status ?? "network"}`);
+      parts.push((await put.json()) as { partNumber: number; etag: string });
+      onStatus(`${mb} MB, uploading… ${Math.min(100, Math.round(((at + partBytes) / blob.size) * 100))} %`);
     }
-    const { url, contentType, key } = (await res.json()) as { url: string; contentType: string; key: string };
-    const put = await fetch(url, { method: "PUT", headers: { "Content-Type": contentType }, body: blob });
-    onStatus(put.ok ? `${mb} MB uploaded to R2 (${key})` : `upload failed (${put.status})`);
+    const done = await post({ action: "complete", key, uploadId, parts });
+    if (!done.ok) throw new Error(`complete ${done.status}`);
+    onStatus(`${mb} MB saved (${key})`);
   } catch (err) {
+    if (started) void post({ action: "abort", key: started.key, uploadId: started.uploadId }).catch(() => {});
     onStatus(`upload failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
