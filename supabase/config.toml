@@ -441,7 +441,9 @@ additional_redirect_urls = ["https://smallstore.smallstore-app.workers.dev/**", 
 
 # Keep the hosted defaults for everything the local stack loosens.
 [remotes.production.auth.email]
-enable_confirmations = true
+# Off during the hackathon (owner's choice, 2026-10-28): sign-up by email works at once, the
+# address is not checked. Turn it back on once a sender (Resend SMTP) is set up.
+enable_confirmations = false
 max_frequency = "1m0s"
 otp_length = 8
 

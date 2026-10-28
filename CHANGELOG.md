@@ -146,3 +146,5 @@ Phase 0, live capture spike.
   `supabase/config.toml` (`[remotes.production]`): site address, 8-character passwords, phone
   sign-up with the WhatsApp hook on the Worker. Checked live: a phone sign-in request reaches the
   hook and the code lands in the production database.
+- Email sign-up no longer waits for a confirmation link during the hackathon (owner's choice): the
+  account opens at once. To turn back on once a sender (Resend SMTP) is set up.
