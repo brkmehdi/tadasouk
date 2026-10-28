@@ -4,7 +4,15 @@ import type { Product } from "@/lib/capture/session";
 
 export const mediaUrl = (key: string) => `/media/${key}`;
 
-export type CatalogImage = { id: string; r2_key: string; position: number; source: "camera" | "studio" | "ai" | "web" };
+export type CatalogImage = {
+  id: string;
+  r2_key: string;
+  position: number;
+  source: "camera" | "studio" | "ai" | "web";
+  color_id: string | null; // the colour this photo shows, when the product has colours
+};
+
+export type CatalogColor = { id: string; name: string; hex: string; position: number };
 
 export type CatalogProduct = {
   id: string;
@@ -18,12 +26,19 @@ export type CatalogProduct = {
   barcode: string | null;
   status: "draft" | "published" | "archived";
   created_at: string;
+  sizes: string[]; // in display order; empty: one size
+  soldout: string[]; // "<colour id or empty>:<size or empty>"
   product_images: CatalogImage[];
+  product_colors: CatalogColor[];
 };
 
-// For supabase-js `select()`: the product and its photos in one request.
+// For supabase-js `select()`: the product, its photos and colours in one request.
+// (one string literal: supabase-js reads its type from it)
 export const PRODUCT_COLUMNS =
-  "id, name, name_ar, description, category, price, compare_at_price, stock, barcode, status, created_at, product_images(id, r2_key, position, source)";
+  "id, name, name_ar, description, category, price, compare_at_price, stock, barcode, status, created_at, sizes, soldout, product_images(id, r2_key, position, source, color_id), product_colors(id, name, hex, position)";
+
+export const colorsOf = (p: CatalogProduct) => [...(p.product_colors ?? [])].sort((a, b) => a.position - b.position);
+export const soldoutKey = (colorId: string | null, size: string | null) => `${colorId ?? ""}:${size ?? ""}`;
 
 export const photosOf = (p: CatalogProduct) => [...p.product_images].sort((a, b) => a.position - b.position);
 

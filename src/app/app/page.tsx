@@ -5,6 +5,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { ORDER_COLUMNS, type Order } from "@/lib/catalog/orders";
+import { PROMO_COLUMNS, SHIPPING_COLUMNS, type PromoCode, type ShippingMethod } from "@/lib/catalog/store-settings";
 import { PRODUCT_COLUMNS, type CatalogProduct } from "@/lib/catalog/types";
 import { LANG_COOKIE, readLang } from "@/lib/lang";
 import { currentUser, serverSupabase } from "@/lib/server/auth";
@@ -26,13 +27,25 @@ export default async function AppPage() {
     .maybeSingle<Store>();
   if (!store) return <Onboarding userId={user.id} phone={user.phone} />;
 
-  const [{ data: products }, { data: orders }, { data: profile }, { data: wallet }] = await Promise.all([
+  const [{ data: products }, { data: orders }, { data: profile }, { data: wallet }, { data: shipping }, { data: promos }] = await Promise.all([
     db.from("products").select(PRODUCT_COLUMNS).eq("store_id", store.id).neq("status", "archived").order("created_at", { ascending: false }),
     db.from("orders").select(ORDER_COLUMNS).eq("store_id", store.id).order("created_at", { ascending: false }).limit(100),
     db.from("profiles").select("ai_access").eq("id", user.id).maybeSingle<{ ai_access: "pending" | "active" }>(),
     db.from("ai_wallets").select("balance_usd").eq("user_id", user.id).maybeSingle<{ balance_usd: number }>(),
+    db.from("shipping_methods").select(SHIPPING_COLUMNS).eq("store_id", store.id).order("position").order("price"),
+    db.from("promo_codes").select(PROMO_COLUMNS).eq("store_id", store.id).order("created_at", { ascending: false }),
   ]);
   const ai = { pending: profile?.ai_access !== "active", balance: Number(wallet?.balance_usd ?? 0) };
 
-  return <BackOffice store={store} products={(products ?? []) as CatalogProduct[]} orders={(orders ?? []) as Order[]} ai={ai} lang={lang} />;
+  return (
+    <BackOffice
+      store={store}
+      products={(products ?? []) as CatalogProduct[]}
+      orders={(orders ?? []) as Order[]}
+      shipping={(shipping ?? []).map((m) => ({ ...m, price: Number(m.price), free_over: m.free_over == null ? null : Number(m.free_over) })) as ShippingMethod[]}
+      promos={(promos ?? []).map((c) => ({ ...c, value: Number(c.value), min_subtotal: Number(c.min_subtotal) })) as PromoCode[]}
+      ai={ai}
+      lang={lang}
+    />
+  );
 }

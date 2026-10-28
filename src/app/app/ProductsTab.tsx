@@ -7,10 +7,11 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { formatPrice } from "@/app/capture/ProductCard";
 import { addPhoto, makeCover, removePhoto } from "@/lib/catalog/photos";
-import { coverOf, mediaUrl, photosOf, type CatalogProduct } from "@/lib/catalog/types";
+import { colorsOf, coverOf, mediaUrl, photosOf, type CatalogProduct } from "@/lib/catalog/types";
 import { useT } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase/browser";
 import type { Store } from "./BackOffice";
+import { ProductOptions } from "./ProductOptions";
 
 type Filter = "all" | "draft" | "published";
 
@@ -111,18 +112,28 @@ export default function ProductsTab({ store, products }: { store: Store; product
         </ul>
       )}
 
-      {open && <ProductEditor key={open.id} store={store} p={open} onClose={() => setOpenId(null)} />}
+      {open && (
+        <ProductEditor
+          key={open.id}
+          store={store}
+          p={open}
+          categories={[...new Set(products.map((x) => x.category?.trim()).filter((c): c is string => !!c))]}
+          onClose={() => setOpenId(null)}
+        />
+      )}
     </section>
   );
 }
 
-function ProductEditor({ store, p, onClose }: { store: Store; p: CatalogProduct; onClose: () => void }) {
+function ProductEditor({ store, p, categories, onClose }: { store: Store; p: CatalogProduct; categories: string[]; onClose: () => void }) {
   const { t } = useT();
   const router = useRouter();
   const [name, setName] = useState(p.name);
   const [price, setPrice] = useState(p.price != null ? String(p.price) : "");
   const [stock, setStock] = useState(p.stock != null ? String(p.stock) : "");
   const [description, setDescription] = useState(p.description ?? "");
+  const [category, setCategory] = useState(p.category ?? "");
+  const [compareAt, setCompareAt] = useState(p.compare_at_price != null ? String(p.compare_at_price) : "");
   const [state, setState] = useState<"idle" | "busy" | "saved" | "error">("idle");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const online = p.status === "published";
@@ -144,7 +155,14 @@ function ProductEditor({ store, p, onClose }: { store: Store; p: CatalogProduct;
       const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
       const { error } = await supabase()
         .from("products")
-        .update({ name: name.trim(), price: num(price), stock: num(stock), description: description.trim() || null })
+        .update({
+          name: name.trim(),
+          price: num(price),
+          compare_at_price: num(compareAt),
+          stock: num(stock),
+          category: category.trim() || null,
+          description: description.trim() || null,
+        })
         .eq("id", p.id);
       if (error) throw error;
     });
@@ -179,6 +197,23 @@ function ProductEditor({ store, p, onClose }: { store: Store; p: CatalogProduct;
               <input className="ui-input tabular-nums" value={stock} onChange={(e) => setStock(e.target.value)} inputMode="numeric" />
             </label>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="ui-label">{t("products.category")}</span>
+              <input className="ui-input" value={category} onChange={(e) => setCategory(e.target.value)} list="categories" placeholder={t("products.categoryHint")} maxLength={40} />
+              <datalist id="categories">
+                {categories.map((c) => (
+                  <option key={c} value={c} />
+                ))}
+              </datalist>
+            </label>
+            <label className="block">
+              <span className="ui-label">
+                {t("products.compareAt")} ({store.currency === "EUR" ? "€" : "DH"})
+              </span>
+              <input className="ui-input tabular-nums" value={compareAt} onChange={(e) => setCompareAt(e.target.value)} inputMode="decimal" />
+            </label>
+          </div>
           <label className="block">
             <span className="ui-label">{t("products.description")}</span>
             <textarea className="ui-input min-h-24 py-2" value={description} onChange={(e) => setDescription(e.target.value)} />
@@ -192,6 +227,8 @@ function ProductEditor({ store, p, onClose }: { store: Store; p: CatalogProduct;
           {state === "saved" && <span className="text-sm text-ok">{t("products.saved")}</span>}
           {state === "error" && <span className="text-sm text-danger">{t("common.error")}</span>}
         </div>
+
+        <ProductOptions storeId={store.id} p={p} />
 
         <button
           type="button"
@@ -262,6 +299,7 @@ function Photos({ store, p }: { store: Store; p: CatalogProduct }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const photos = photosOf(p);
+  const colors = colorsOf(p);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -312,7 +350,30 @@ function Photos({ store, p }: { store: Store; p: CatalogProduct }) {
         </label>
       </div>
       {selected && (
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
+          {colors.length > 0 && (
+            <label className="flex items-center gap-2 text-[13px] text-ink-2">
+              {t("products.photoColor")}
+              <select
+                className="ui-input h-9 w-auto px-2 text-[13px]"
+                value={photos.find((i) => i.id === selected)?.color_id ?? ""}
+                disabled={busy}
+                onChange={(e) =>
+                  void run(async () => {
+                    const { error } = await supabase().from("product_images").update({ color_id: e.target.value || null }).eq("id", selected);
+                    if (error) throw error;
+                  })
+                }
+              >
+                <option value="">{t("products.noColor")}</option>
+                {colors.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {photos[0]?.id !== selected && (
             <button type="button" disabled={busy} onClick={() => void run(() => makeCover(p, selected))} className="ui-btn ui-btn-secondary h-9 px-3 text-[13px]">
               {t("products.makeCover")}

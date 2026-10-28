@@ -33,21 +33,30 @@ Built so far:
 - **AI credit per account**: every Meta Model API call is charged to the signed-in account: $2
   given once at sign-up to the first 10 accounts, later accounts activated by the owner in
   `/admin`; a platform daily cap stays as a safety net. One usage row per call.
-- **Public store** at `/{slug}`: hero photo (uploaded or made by muse-image-1.0), product pages
-  with WhatsApp previews (Open Graph) and schema.org Product data, basket, cash-on-delivery order
-  priced by the database; the merchant previews drafts and handles orders in the back office.
+- **Public store** at `/{slug}`: home (hero photo uploaded or made by muse-image-1.0, best
+  sellers, categories), category pages with sorting and colour/size filters, search, product
+  pages (gallery per colour, sizes with sold-out ones greyed, suggestions, WhatsApp previews
+  through Open Graph, schema.org Product data), a cart drawer, a cart page with the delivery
+  methods, a two-column checkout (cash on delivery or credit; card later) and a thank-you page.
+  The database prices every cart and order (`quote_cart`, `place_order`): colours and sizes,
+  delivery free above a threshold, promotion codes.
 - **Merchant back office**: a shop menu (home, products, sales, settings) with the red record
   button in the middle, French and English, a first-visit guide; every filmed product saved as a
-  draft (photos on Cloudflare R2), put online by a button or by voice; counter sale with the
-  saved products.
+  draft (photos on Cloudflare R2), put online by a button or by voice; categories proposed by
+  the AI at capture (reusing the store's own), colours, sizes and sold-out combinations, delivery
+  methods, promotion codes; counter sale with the saved products.
+- **The store that listens**: a microphone in the back office. The merchant says (or types) what
+  to change, in Darija, French, Arabic or English: prices, going online, categories, colours and
+  sizes, sold out, delivery, promotion codes, the store's line, a new store photo, or asks about
+  sales. The store does it and answers aloud; each change can be undone, deletions wait for a
+  button.
 - **Database with row level security** (Supabase Postgres): a merchant only reaches the rows of
   their own store, visitors only see what is published; tested in `supabase/tests/`.
 - **Design kit** (`design-kit/`): design system, tokens, screenshots and a build prompt.
 
-Planned for the rest of the event, **not built yet**: polish pass, shipping fees, card
-payments through TChenTChen, credit book and installment reminders, AI credit top-ups, English on
-the camera screen and the store. This list moves up as each
-part lands.
+Planned for the rest of the event, **not built yet**: polish pass, card payments through
+TChenTChen, credit book and installment reminders, AI credit top-ups, English on the camera
+screen and the store. This list moves up as each part lands.
 
 ## Preexisting components (not part of this submission)
 
@@ -69,7 +78,8 @@ part lands.
 | Model | What it does in the app | Where it is called |
 |---|---|---|
 | `muse-spark-1.3` | Live voice agent: turns what the merchant says into tool calls (price, discount, rename, description, stock, remove, undo, next product, questions) | `src/app/api/agent/route.ts` |
-| `muse-spark-1.3` | Names and describes each captured product | `src/app/api/identify/route.ts` |
+| `muse-spark-1.3` | Names, describes and files each captured product in one of the store's categories | `src/app/api/identify/route.ts` |
+| `muse-spark-1.3` | The store that listens: back office requests turned into tool calls on the store's data, with a spoken answer | `src/app/api/store-agent/route.ts` |
 | `muse-spark-1.3` | Finds the whole product under the merchant's finger (hold-to-frame) | `src/app/api/locate/route.ts` |
 | `muse-spark-1.3` | Price check with web search from Morocco: lowest, average, highest, suggested price, sources | `src/app/api/price-check/route.ts` |
 | `muse-spark-1.3` | Quality score of each product photo | `src/app/api/photo-score/route.ts` |
@@ -77,7 +87,7 @@ part lands.
 | `muse-image-1.0` | Studio photo: new background and shadow, the real product pasted back | `src/app/api/studio-photo/route.ts` |
 | `muse-image-1.0` | Three photos of the product from other angles | `src/app/api/better-photos/route.ts` |
 | `muse-image-1.0` | The store's hero photo, on request | `src/app/api/store-hero/route.ts` |
-| `muse-voice-transcribe-1.0` | Transcription of short speech chunks for the captions and the agent | `src/app/api/transcribe/route.ts` |
+| `muse-voice-transcribe-1.0` | Transcription of short speech chunks for the captions and both agents | `src/app/api/transcribe/route.ts` |
 
 All of these go through `src/lib/server/meta.ts`, which adds the API key on the server and
 checks the spending caps (`src/lib/server/usage.ts`) before each call. The key never reaches the

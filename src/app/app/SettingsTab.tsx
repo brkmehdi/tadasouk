@@ -1,17 +1,24 @@
 "use client";
 
-// Settings: the store's name, city and WhatsApp, the payments it accepts, the language.
+// Settings: the store's name, city and WhatsApp, its look, the payments it accepts, delivery
+// methods, promotion codes, the language.
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { shrink, uploadMedia } from "@/lib/catalog/photos";
+import type { PromoCode, ShippingMethod } from "@/lib/catalog/store-settings";
 import { mediaUrl } from "@/lib/catalog/types";
 import { displayPhone, phoneDigits } from "@/lib/phone";
 import { useT } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase/browser";
 import type { Store } from "./BackOffice";
 
-export default function SettingsTab({ store, onSignOut }: { store: Store; onSignOut: () => void }) {
+export default function SettingsTab({ store, shipping, promos, onSignOut }: {
+  store: Store;
+  shipping: ShippingMethod[];
+  promos: PromoCode[];
+  onSignOut: () => void;
+}) {
   const { t, lang, setLang } = useT();
   const router = useRouter();
   const [name, setName] = useState(store.name);
@@ -84,6 +91,9 @@ export default function SettingsTab({ store, onSignOut }: { store: Store; onSign
         {state === "saved" && <span className="text-sm text-ok">{t("settings.saved")}</span>}
         {state === "error" && <span className="text-sm text-danger">{t("common.error")}</span>}
       </div>
+
+      <Delivery store={store} methods={shipping} />
+      <Promos store={store} codes={promos} />
 
       <div className="ui-card flex items-center justify-between p-4">
         <span className="text-sm font-medium">{t("settings.language")}</span>
@@ -224,6 +234,199 @@ function Look({ store }: { store: Store }) {
           {t("settings.viewStore")} ↗
         </a>
       </div>
+    </section>
+  );
+}
+
+const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
+
+// Delivery methods: each field saves when the merchant leaves it; a new one is added at the end.
+function Delivery({ store, methods }: { store: Store; methods: ShippingMethod[] }) {
+  const { t } = useT();
+  const router = useRouter();
+  const [error, setError] = useState(false);
+  const [draft, setDraft] = useState({ name: "", price: "", free: "", days: "" });
+  const money = store.currency === "EUR" ? "€" : "DH";
+
+  const run = async (fn: () => PromiseLike<{ error: unknown }>) => {
+    setError(false);
+    const { error } = await fn();
+    if (error) setError(true);
+    else router.refresh();
+    return !error;
+  };
+  const update = (id: string, patch: Partial<ShippingMethod>) => void run(() => supabase().from("shipping_methods").update(patch).eq("id", id));
+  const add = async () => {
+    const price = num(draft.price);
+    if (!draft.name.trim() || price == null) return;
+    const done = await run(() =>
+      supabase()
+        .from("shipping_methods")
+        .insert({ store_id: store.id, name: draft.name.trim(), price, free_over: num(draft.free), delay_days: num(draft.days), position: methods.length }),
+    );
+    if (done) setDraft({ name: "", price: "", free: "", days: "" });
+  };
+  const cell = "ui-input h-9 px-2 text-[14px] tabular-nums";
+
+  return (
+    <section className="ui-card p-4">
+      <p className="text-sm font-medium">{t("settings.shipping")}</p>
+      <p className="mt-0.5 text-xs text-ink-3">{t("settings.shippingHint")}</p>
+      {methods.length === 0 && <p className="mt-3 text-sm text-ink-2">{t("settings.shipNone")}</p>}
+      <ul className="mt-3 flex flex-col gap-3">
+        {methods.map((m) => (
+          <li key={m.id} className={`flex flex-col gap-2 border-b border-line pb-3 ${m.active ? "" : "opacity-60"}`}>
+            <div className="flex items-center gap-2">
+              <input
+                className={`${cell} flex-1`}
+                defaultValue={m.name}
+                aria-label={t("settings.shipName")}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== m.name) update(m.id, { name: v });
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => update(m.id, { active: !m.active })}
+                className={`rounded px-2 py-1 text-[11px] font-medium ${m.active ? "bg-ok/15 text-ok" : "bg-soft text-ink-2"}`}
+              >
+                {m.active ? t("settings.active") : t("settings.paused")}
+              </button>
+              <button type="button" onClick={() => void run(() => supabase().from("shipping_methods").delete().eq("id", m.id))} className="text-[12px] text-danger">
+                {t("settings.delete")}
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-[11px] text-ink-3">
+              <label>
+                {t("settings.shipPrice")} ({money})
+                <input
+                  className={cell}
+                  inputMode="decimal"
+                  defaultValue={m.price}
+                  onBlur={(e) => {
+                    const v = num(e.target.value);
+                    if (v != null && v !== m.price) update(m.id, { price: v });
+                  }}
+                />
+              </label>
+              <label>
+                {t("settings.shipFree")} ({money})
+                <input
+                  className={cell}
+                  inputMode="decimal"
+                  defaultValue={m.free_over ?? ""}
+                  onBlur={(e) => {
+                    const v = num(e.target.value);
+                    if (v !== m.free_over) update(m.id, { free_over: v });
+                  }}
+                />
+              </label>
+              <label>
+                {t("settings.shipDays")}
+                <input
+                  className={cell}
+                  inputMode="numeric"
+                  defaultValue={m.delay_days ?? ""}
+                  onBlur={(e) => {
+                    const v = num(e.target.value);
+                    if (v !== m.delay_days) update(m.id, { delay_days: v });
+                  }}
+                />
+              </label>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <input className={`${cell} col-span-2 sm:col-span-1`} placeholder={t("settings.shipName")} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+        <input className={cell} placeholder={`${t("settings.shipPrice")} (${money})`} inputMode="decimal" value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} />
+        <input className={cell} placeholder={`${t("settings.shipFree")} (${money})`} inputMode="decimal" value={draft.free} onChange={(e) => setDraft({ ...draft, free: e.target.value })} />
+        <input className={cell} placeholder={t("settings.shipDays")} inputMode="numeric" value={draft.days} onChange={(e) => setDraft({ ...draft, days: e.target.value })} />
+      </div>
+      <button type="button" onClick={() => void add()} disabled={!draft.name.trim() || num(draft.price) == null} className="ui-btn ui-btn-secondary mt-2 h-9 px-3 text-[13px]">
+        {t("settings.shipAdd")}
+      </button>
+      {error && <p className="mt-2 text-sm text-danger">{t("common.error")}</p>}
+    </section>
+  );
+}
+
+// Promotion codes: a list with on/off, and a line to create one (percentage or amount).
+function Promos({ store, codes }: { store: Store; codes: PromoCode[] }) {
+  const { t } = useT();
+  const router = useRouter();
+  const [error, setError] = useState(false);
+  const [code, setCode] = useState("");
+  const [kind, setKind] = useState<"percent" | "amount">("percent");
+  const [value, setValue] = useState("");
+  const [min, setMin] = useState("");
+  const money = store.currency === "EUR" ? "€" : "DH";
+
+  const run = async (fn: () => PromiseLike<{ error: unknown }>) => {
+    setError(false);
+    const { error } = await fn();
+    if (error) setError(true);
+    else router.refresh();
+    return !error;
+  };
+  const clean = code.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "");
+  const amount = num(value) ?? 0;
+  const ok = clean.length >= 3 && amount > 0 && (kind === "amount" || amount <= 90);
+  const create = async () => {
+    const done = await run(() => supabase().from("promo_codes").insert({ store_id: store.id, code: clean, kind, value: amount, min_subtotal: num(min) ?? 0 }));
+    if (done) {
+      setCode("");
+      setValue("");
+      setMin("");
+    }
+  };
+  const cell = "ui-input h-9 px-2 text-[14px]";
+
+  return (
+    <section className="ui-card p-4">
+      <p className="text-sm font-medium">{t("settings.promos")}</p>
+      <p className="mt-0.5 text-xs text-ink-3">{t("settings.promosHint")}</p>
+      {codes.length === 0 && <p className="mt-3 text-sm text-ink-2">{t("settings.promoNone")}</p>}
+      <ul className="mt-2 divide-y divide-line">
+        {codes.map((c) => (
+          <li key={c.id} className={`flex items-center gap-3 py-2.5 text-sm ${c.active ? "" : "opacity-60"}`}>
+            <span className="rounded bg-soft px-2 py-1 font-mono text-[13px] font-semibold">{c.code}</span>
+            <span className="min-w-0 flex-1 text-ink-2">
+              -{c.kind === "percent" ? `${c.value} %` : `${c.value} ${money}`}
+              {c.min_subtotal > 0 ? ` · min ${c.min_subtotal} ${money}` : ""}
+              <span className="block text-xs text-ink-3">
+                {t("settings.promoUsed")} {c.uses}×
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void run(() => supabase().from("promo_codes").update({ active: !c.active }).eq("id", c.id))}
+              className={`rounded px-2 py-1 text-[11px] font-medium ${c.active ? "bg-ok/15 text-ok" : "bg-soft text-ink-2"}`}
+            >
+              {c.active ? t("settings.active") : t("settings.paused")}
+            </button>
+            <button type="button" onClick={() => void run(() => supabase().from("promo_codes").delete().eq("id", c.id))} className="text-[12px] text-danger">
+              {t("settings.delete")}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <input className={`${cell} col-span-2 font-mono uppercase`} placeholder={t("settings.promoCode")} value={code} onChange={(e) => setCode(e.target.value)} maxLength={20} />
+        <div className="flex gap-1">
+          <input className={`${cell} tabular-nums`} placeholder={t("settings.promoValue")} inputMode="decimal" value={value} onChange={(e) => setValue(e.target.value)} />
+          <select className={`${cell} w-16`} value={kind} onChange={(e) => setKind(e.target.value as "percent" | "amount")} aria-label={t("settings.promoValue")}>
+            <option value="percent">%</option>
+            <option value="amount">{money}</option>
+          </select>
+        </div>
+        <input className={`${cell} tabular-nums`} placeholder={`${t("settings.promoMin")} (${money})`} inputMode="decimal" value={min} onChange={(e) => setMin(e.target.value)} />
+      </div>
+      <button type="button" disabled={!ok} onClick={() => void create()} className="ui-btn ui-btn-secondary mt-2 h-9 px-3 text-[13px]">
+        {t("settings.promoAdd")}
+      </button>
+      {error && <p className="mt-2 text-sm text-danger">{t("common.error")}</p>}
     </section>
   );
 }

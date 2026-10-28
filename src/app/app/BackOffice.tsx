@@ -15,8 +15,10 @@ import { I18nProvider, useT, type Lang } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase/browser";
 import Guide from "./Guide";
 import HomeTab from "./HomeTab";
+import type { PromoCode, ShippingMethod } from "@/lib/catalog/store-settings";
 import ProductsTab from "./ProductsTab";
 import SalesTab from "./SalesTab";
+import { StoreAssistant } from "./StoreAssistant";
 import SettingsTab from "./SettingsTab";
 
 export type Store = {
@@ -38,7 +40,15 @@ export type Tab = "home" | "products" | "sales" | "settings";
 
 export type AiCredit = { pending: boolean; balance: number };
 
-type Props = { store: Store; products: CatalogProduct[]; orders: Order[]; ai: AiCredit; lang: Lang };
+type Props = {
+  store: Store;
+  products: CatalogProduct[];
+  orders: Order[];
+  shipping: ShippingMethod[];
+  promos: PromoCode[];
+  ai: AiCredit;
+  lang: Lang;
+};
 
 export default function BackOffice(props: Props) {
   return (
@@ -48,7 +58,7 @@ export default function BackOffice(props: Props) {
   );
 }
 
-function Shell({ store, products, orders, ai }: Props) {
+function Shell({ store, products, orders, shipping, promos, ai }: Props) {
   const { t, lang, setLang } = useT();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("home");
@@ -117,6 +127,8 @@ function Shell({ store, products, orders, ai }: Props) {
         {tab === "settings" && (
           <SettingsTab
             store={store}
+            shipping={shipping}
+            promos={promos}
             onSignOut={async () => {
               await supabase().auth.signOut();
               router.replace("/connexion");
@@ -148,6 +160,8 @@ function Shell({ store, products, orders, ai }: Props) {
           <NavItem icon="settings" label={t("nav.settings")} active={tab === "settings"} onClick={() => setTab("settings")} />
         </div>
       </nav>
+
+      {!camera && !selling && <StoreAssistant />}
 
       {/* The camera stays mounted so the red button can start it inside its own tap. */}
       <div className={camera ? "fixed inset-0 z-50" : "hidden"}>

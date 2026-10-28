@@ -201,3 +201,18 @@ Phase 0, live capture spike.
   player and ran out of memory (Cloudflare error 1102). A Worker entry (`worker.ts`) now streams
   `/media/captures/...` straight from R2 with correct byte ranges, behind links signed for the
   admin page (`MEDIA_LINK_SECRET`, 12 hours); every other request goes to Next.js as before.
+- Store v2, laid out like the shop prototype designed for SmallStore (rebuilt in this codebase's
+  own components; no file of the prototype is used): a header with the categories, search and the
+  cart; home with best sellers and categories; category pages with sorting and filters; product
+  pages with a gallery per colour, sizes, sold-out sizes, quantity, details and suggestions; a
+  cart drawer; a cart page; a two-column checkout; a thank-you page.
+- Database: product colours (photos per colour), sizes and sold-out combinations, promotion codes,
+  discount and delivery on orders, colour and size on order lines; `cart_total` shared by
+  `quote_cart` (cart and checkout) and `place_order` (refuses a line, code or delivery that
+  changed). 17 more database tests.
+- Back office: category, compare-at price, colours, sizes and the sold-out grid in the product
+  editor; delivery methods and promotion codes in Settings. `/api/identify` gets the store's
+  categories and reuses them.
+- The store that listens (`/api/store-agent`, `StoreAssistant`): spoken or typed requests in the
+  back office, done with tools under the merchant's own session, answered aloud, each change
+  undoable, deletions confirmed by a button.
