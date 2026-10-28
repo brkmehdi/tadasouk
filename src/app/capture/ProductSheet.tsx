@@ -21,6 +21,7 @@ type Props = {
   onBetterPhotos: () => void;
   onCheckPrice: () => void;
   onRemove: () => void;
+  onPublish: (online: boolean) => void; // drafts until the merchant puts them online
 };
 
 const DURATION = 320;
@@ -246,7 +247,18 @@ export default function ProductSheet(props: Props) {
         </div>
         {p.photos === "error" && <p className="mt-2 text-[13px] text-danger">Les photos n’ont pas pu être créées.</p>}
 
-        <div className="mt-4 flex justify-center">
+        <button
+          type="button"
+          onClick={() => props.onPublish(!p.online)}
+          className={`ui-btn mt-4 h-11 w-full ${p.online ? "ui-btn-secondary" : "ui-btn-primary"}`}
+        >
+          {p.online ? "Retirer de la boutique" : "Mettre en ligne"}
+        </button>
+        <p className="mt-1.5 text-center text-xs text-ink-3">
+          {p.online ? "En ligne dans votre boutique." : "Brouillon : enregistré, pas encore visible."}
+        </p>
+
+        <div className="mt-2 flex justify-center">
           <button type="button" onClick={props.onRemove} className="ui-btn h-9 text-[13px] text-danger hover:bg-soft">
             Supprimer ce produit
           </button>

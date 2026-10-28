@@ -1,7 +1,8 @@
 "use client";
 
 import type { ObjectDetector } from "@mediapipe/tasks-vision";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore } from "react";
+import { createCatalogSync } from "@/lib/catalog/sync";
 import { ghostCrop, grabKeyframe, locateProduct, segment, SegmentError, type Keyframe } from "@/lib/capture/cutout";
 import { coversCenter, createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
 import { SceneTrigger } from "@/lib/capture/scene";
@@ -27,6 +28,7 @@ import {
   removeProduct,
   aiPatch,
   type Effect,
+  type Product,
   type ProductImage,
   type Question,
   type SessionState,
@@ -53,7 +55,14 @@ const SAME_CUTOUT = 0.76;
 const SCAN_EVERY_MS = 700; // barcode look-ups on the live video while filming
 const STORE_NAME = "Ma boutique"; // until the store settings exist (Phase 1)
 
-export default function CaptureScreen() {
+export type CaptureApi = { start: () => void };
+
+// Standalone at /capture, or inside the back office (/app): there the red button of the menu
+// calls start() in its own tap (iOS needs the tap for the camera and the sound), every product
+// is saved as a draft of `storeId`, and the exit button goes back to the menu.
+type Props = { ref?: React.Ref<CaptureApi>; storeId?: string; onExit?: (saving: Promise<void>) => void };
+
+export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -64,6 +73,10 @@ export default function CaptureScreen() {
   // For products the detector has no class for: phone still + sharp middle (scene.ts).
   const sceneRef = useRef(new SceneTrigger());
   const sceneBusyRef = useRef(false); // asking /api/locate whether a product is in the middle
+  // Drafts: products are saved to the store as they change (catalog/sync.ts); savedRef holds
+  // the versions already handed to the sync.
+  const syncRef = useRef<ReturnType<typeof createCatalogSync> | null>(null);
+  const savedRef = useRef(new Map<string, Product>());
   const recorderRef = useRef<MediaRecorder | null>(null);
   const voiceRef = useRef<{ stop: () => Promise<void> } | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -584,6 +597,7 @@ export default function CaptureScreen() {
     setHelp(null);
     setUpload(null);
     sessionIdRef.current = crypto.randomUUID();
+    savedRef.current = new Map(); // a new session: products saved before stay saved
     metricsRef.current = emptyMetrics();
     refreshMetrics();
     setSession(initialSession(sessionRef.current.currency));
@@ -660,6 +674,34 @@ export default function CaptureScreen() {
         .catch(() => setDetectorState("failed"));
     }
   }, [caption, handleChunk, step, refreshMetrics, setArmed, setAttach, setSession]);
+
+  useImperativeHandle(ref, () => ({ start: () => void start() }), [start]);
+
+  // ---------- drafts: every product is saved to the store while it changes ----------
+  useEffect(() => {
+    syncRef.current = storeId ? createCatalogSync(storeId, (m) => console.error("draft not saved:", m)) : null;
+  }, [storeId]);
+  const pushChanges = useCallback(() => {
+    const products = sessionRef.current.products;
+    const before = savedRef.current;
+    const now = new Map(products.map((p) => [p.id, p]));
+    const changed = products.filter((p) => before.get(p.id) !== p);
+    for (const [id, p] of before) if (!now.has(id)) changed.push({ ...p, status: "removing" });
+    savedRef.current = now;
+    if (changed.length) syncRef.current?.push(changed);
+  }, []);
+  useEffect(() => {
+    if (!syncRef.current) return;
+    const t = setTimeout(pushChanges, 800);
+    return () => clearTimeout(t);
+  }, [session.products, pushChanges]);
+  // Back to the menu at once; the last photos keep saving and the menu refreshes when done.
+  const exit = () => {
+    void stop().then(() => {
+      pushChanges();
+      onExit?.(syncRef.current?.flush() ?? Promise.resolve());
+    });
+  };
 
   const stop = useCallback(async () => {
     cancelAnimationFrame(loopRef.current);
@@ -882,7 +924,7 @@ export default function CaptureScreen() {
         {recording && detectorState === "failed" && (
           <span className="rounded-full bg-black/45 px-2.5 py-1 backdrop-blur">Touchez un produit pour le prendre</span>
         )}
-        {phase === "stopped" && session.products.some((p) => p.status === "active") && (
+        {!onExit && phase === "stopped" && session.products.some((p) => p.status === "active") && (
           <button
             type="button"
             onClick={() => setMode("sell")}
@@ -964,11 +1006,11 @@ export default function CaptureScreen() {
       {/* controls: exit on the left, the button in the middle starts the camera then takes
           photos (echoes while the merchant talks), "+" for the next product on the right */}
       <div className="absolute inset-x-0 bottom-0 flex h-[calc(5.5rem+env(safe-area-inset-bottom))] items-start justify-center pt-3">
-        {recording && (
+        {(recording || (onExit && phase !== "starting")) && (
           <button
             type="button"
-            onClick={stop}
-            aria-label="Terminer"
+            onClick={onExit ? exit : () => void stop()}
+            aria-label={onExit ? "Retour au menu" : "Terminer"}
             className="absolute start-5 top-4 flex h-12 w-12 items-center justify-center rounded-full bg-white/20 text-white ring-1 ring-white/40 backdrop-blur"
           >
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
@@ -1029,6 +1071,7 @@ export default function CaptureScreen() {
           onBetterPhotos={() => runEffect({ kind: "better_photos", productId: openProduct.id })}
           onCheckPrice={() => runEffect({ kind: "check_price", productId: openProduct.id })}
           onRemove={() => setConfirmId(openProduct.id)}
+          onPublish={(online) => setSession(editProduct(sessionRef.current, openProduct.id, { online }))}
         />
       )}
 

@@ -157,3 +157,20 @@ Phase 0, live capture spike.
   and its GPU start can hang on some phones (now it falls back to the CPU after 5 s). The service
   worker keeps the detector files (about 17 MB) after the first visit.
 - AI answers no longer wait for the usage write: it runs after the response is sent.
+- Back office (`/app`): a menu like a shop's (Accueil, Produits, Ventes, Réglages) with the red
+  record button in the middle. The button opens the camera over the menu in the same tap; its
+  exit button comes back to the menu. French and English (switch in the header and in Settings,
+  kept in a cookie).
+- First-visit guide on the home tab: four steps (open the camera, show a product, say its price,
+  put it online) that tick themselves from what the store holds; the red button pulses until the
+  first product. Can be hidden and shown again.
+- Every filmed product is saved as a draft while it changes (name, price, stock, description,
+  photos, online or not): photos to R2 through `/api/media` (into the merchant's own store
+  folder), served by `/media/...`; rows through Supabase with the merchant's session. Web photos
+  stay out of the store (other shops' pictures).
+- Putting products online: a button in the product sheet (camera) and in the Products tab, "Tout
+  mettre en ligne", or by voice ("mets-le en ligne", "activez ces produits", "tl3o kamlin"; new
+  agent tool `publish_products`). The first product online puts the store online.
+- Products tab: filters (all, drafts, online), edit name, price, stock and description, delete.
+  Sales tab: counter sale with the saved products (stock goes down). Settings: name, city,
+  WhatsApp, cash on delivery and customer credit switches, language, sign out.

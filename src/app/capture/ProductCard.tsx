@@ -49,6 +49,9 @@ export default function ProductCard({ p, current, flash, attaching, onOpen, onRe
           )}
           {(img?.pending || p.photos === "loading") && <div className="shimmer absolute inset-0" />}
           {busy && <span className="absolute start-1.5 top-1.5 h-2 w-2 animate-pulse rounded-full bg-brand" aria-label="Recherche en cours" />}
+          {p.online && (
+            <span className="absolute end-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-ok ring-2 ring-white" aria-label="En ligne" />
+          )}
           {p.images.length > 1 && (
             <span className="absolute start-1 bottom-1 rounded bg-black/55 px-1 text-[10px] leading-4 text-white tabular-nums">
               {p.images.length}

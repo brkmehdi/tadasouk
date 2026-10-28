@@ -33,13 +33,17 @@ Built so far:
 - **AI credit per account**: every Meta Model API call is charged to the signed-in account,
   $0.50 free per day (reset at midnight in Morocco), then a prepaid balance; a platform daily cap
   stays as a safety net. One usage row per call.
+- **Merchant back office**: a shop menu (home, products, sales, settings) with the red record
+  button in the middle, French and English, a first-visit guide; every filmed product saved as a
+  draft (photos on Cloudflare R2), put online by a button or by voice; counter sale with the
+  saved products.
 - **Database with row level security** (Supabase Postgres): a merchant only reaches the rows of
   their own store, visitors only see what is published; tested in `supabase/tests/`.
 - **Design kit** (`design-kit/`): design system, tokens, screenshots and a build prompt.
 
-Planned for the rest of the event, **not built yet**: saving captured products, polish pass,
-storefront, the rest of the merchant back office (products, orders, shipping), order confirmation
-flow, card payments through TChenTChen, credit book and installment reminders, AI credit top-ups. This list moves up as each
+Planned for the rest of the event, **not built yet**: polish pass, storefront, orders and
+shipping in the back office, order confirmation flow, card payments through TChenTChen, credit
+book and installment reminders, AI credit top-ups, English on the camera screen. This list moves up as each
 part lands.
 
 ## Preexisting components (not part of this submission)

@@ -1,50 +1,189 @@
 "use client";
 
-// Back office home. The red button opens the camera; the products, orders and shipping parts
-// come next (Phase 1 plan, steps 2 and 3).
+// Back office: a menu like a shop's (home, products, sales, settings) with the red record button
+// in the middle. The button opens the camera in the same tap (iOS needs the tap for the camera
+// and the sound) over the menu; its exit button comes back here, where the filmed products are
+// already saved as drafts.
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
+import CaptureScreen, { type CaptureApi } from "@/app/capture/CaptureScreen";
+import SellMode from "@/app/capture/SellMode";
+import { toSessionProduct, type CatalogProduct } from "@/lib/catalog/types";
+import { I18nProvider, useT, type Lang } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase/browser";
+import Guide from "./Guide";
+import HomeTab from "./HomeTab";
+import ProductsTab from "./ProductsTab";
+import SalesTab from "./SalesTab";
+import SettingsTab from "./SettingsTab";
 
-type Store = { id: string; name: string; slug: string; city: string | null; whatsapp: string | null; published: boolean };
+export type Store = {
+  id: string;
+  name: string;
+  slug: string;
+  city: string | null;
+  whatsapp: string | null;
+  currency: string;
+  published: boolean;
+  cod_enabled: boolean;
+  card_enabled: boolean;
+  credit_enabled: boolean;
+};
 
-export default function BackOffice({ store }: { store: Store }) {
+export type Tab = "home" | "products" | "sales" | "settings";
+
+type Props = { store: Store; products: CatalogProduct[]; orders: number; lang: Lang };
+
+export default function BackOffice(props: Props) {
+  return (
+    <I18nProvider initial={props.lang}>
+      <Shell {...props} />
+    </I18nProvider>
+  );
+}
+
+function Shell({ store, products, orders }: Props) {
+  const { t, lang, setLang } = useT();
   const router = useRouter();
+  const [tab, setTab] = useState<Tab>("home");
+  const [camera, setCamera] = useState(false);
+  const [selling, setSelling] = useState(false);
+  const captureRef = useRef<CaptureApi>(null);
 
-  const signOut = async () => {
-    await supabase().auth.signOut();
-    router.replace("/connexion");
+  const openCamera = () => {
+    captureRef.current?.start(); // in this tap, before anything else
+    setCamera(true);
+  };
+  const closeCamera = (saving: Promise<void>) => {
+    setCamera(false);
+    router.refresh();
+    void saving.then(() => router.refresh());
   };
 
+  const firstSteps = products.length === 0;
+
   return (
-    <main className="flex min-h-dvh flex-col bg-white text-ink">
-      <header className="flex items-center gap-3 px-5 pt-[max(1rem,env(safe-area-inset-top))] pb-3">
+    <main className="min-h-dvh bg-white pb-[calc(5.5rem+env(safe-area-inset-bottom))] text-ink">
+      <header className="sticky top-0 z-10 flex items-center gap-3 bg-white/90 px-5 pt-[max(0.9rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
         <div className="min-w-0 flex-1">
-          <p className="truncate text-base font-medium">{store.name}</p>
-          <p className="truncate text-xs text-ink-3">{store.published ? "En ligne" : "Pas encore en ligne"}</p>
+          <p className="truncate text-base font-semibold tracking-[-0.01em]">{store.name}</p>
+          <p className="flex items-center gap-1.5 truncate text-xs text-ink-3">
+            <span className={`h-1.5 w-1.5 rounded-full ${store.published ? "bg-ok" : "bg-ink-3/50"}`} />
+            {store.published ? t("header.online") : t("header.offline")}
+          </p>
         </div>
-        <button type="button" className="text-sm text-ink-3" onClick={() => void signOut()}>
-          Se déconnecter
-        </button>
+        <div className="flex rounded-md bg-soft p-0.5 text-xs font-medium" role="group" aria-label={t("settings.language")}>
+          {(["fr", "en"] as const).map((l) => (
+            <button
+              key={l}
+              type="button"
+              onClick={() => setLang(l)}
+              aria-pressed={lang === l}
+              className={`rounded px-2 py-1 uppercase ${lang === l ? "bg-white text-ink shadow-sm" : "text-ink-3"}`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
       </header>
 
-      <section className="flex flex-col items-center px-6 pt-10 pb-12 text-center">
-        <Link
-          href="/capture"
-          aria-label="Filmer mes produits"
-          className="flex h-16 w-16 items-center justify-center rounded-full ring-[3px] ring-ink/80 active:scale-95"
-        >
-          <span className="h-[52px] w-[52px] rounded-full bg-red-500" />
-        </Link>
-        <p className="mt-4 text-sm font-medium">Filmer mes produits</p>
-        <p className="mt-1 text-xs text-ink-3">Montrez un produit, dites son prix.</p>
-      </section>
+      <div className="px-5">
+        {tab === "home" && (
+          <>
+            <Guide products={products} onRecord={openCamera} />
+            <HomeTab products={products} orders={orders} currency={store.currency} onTab={setTab} />
+          </>
+        )}
+        {tab === "products" && <ProductsTab store={store} products={products} />}
+        {tab === "sales" && <SalesTab orders={orders} products={products} onCounterSale={() => setSelling(true)} />}
+        {tab === "settings" && (
+          <SettingsTab
+            store={store}
+            onSignOut={async () => {
+              await supabase().auth.signOut();
+              router.replace("/connexion");
+            }}
+          />
+        )}
+      </div>
 
-      <section className="border-t border-line px-5 py-6">
-        <h2 className="text-sm font-medium">Produits</h2>
-        <p className="mt-2 text-sm text-ink-3">Les produits que vous filmez apparaîtront ici.</p>
-      </section>
+      <nav
+        className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur"
+        aria-label="Menu"
+      >
+        <div className="mx-auto grid h-16 max-w-lg grid-cols-5 items-center text-[11px] font-medium">
+          <NavItem icon="home" label={t("nav.home")} active={tab === "home"} onClick={() => setTab("home")} />
+          <NavItem icon="products" label={t("nav.products")} active={tab === "products"} onClick={() => setTab("products")} />
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={openCamera}
+              aria-label={t("nav.record")}
+              className={`-mt-7 flex h-16 w-16 items-center justify-center rounded-full bg-white ring-[3px] ring-ink/80 shadow-lg active:scale-95 ${
+                firstSteps ? "guide-pulse" : ""
+              }`}
+            >
+              <span className="h-[52px] w-[52px] rounded-full bg-red-500" />
+            </button>
+          </div>
+          <NavItem icon="sales" label={t("nav.sales")} active={tab === "sales"} onClick={() => setTab("sales")} />
+          <NavItem icon="settings" label={t("nav.settings")} active={tab === "settings"} onClick={() => setTab("settings")} />
+        </div>
+      </nav>
+
+      {/* The camera stays mounted so the red button can start it inside its own tap. */}
+      <div className={camera ? "fixed inset-0 z-50" : "hidden"}>
+        <CaptureScreen ref={captureRef} storeId={store.id} onExit={closeCamera} />
+      </div>
+
+      {selling && (
+        <div className="fixed inset-0 z-50">
+          <SellMode
+            products={products.map((p, i) => toSessionProduct(p, store.currency, i))}
+            currency={store.currency}
+            storeName={store.name}
+            onExit={() => setSelling(false)}
+            onSold={async (lines) => {
+              // Lower the stock of the products that have one.
+              const db = supabase();
+              for (const l of lines) {
+                const p = products.find((x) => x.id === l.productId);
+                if (p?.stock != null) await db.from("products").update({ stock: Math.max(0, p.stock - l.qty) }).eq("id", p.id);
+              }
+              router.refresh();
+            }}
+          />
+        </div>
+      )}
     </main>
+  );
+}
+
+const ICONS: Record<string, React.ReactNode> = {
+  home: <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" />,
+  products: <path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" />,
+  sales: <path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6" />,
+  settings: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" />
+    </>
+  ),
+};
+
+function NavItem({ icon, label, active, onClick }: { icon: string; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      className={`flex flex-col items-center gap-1 ${active ? "text-brand" : "text-ink-3"}`}
+    >
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" aria-hidden>
+        {ICONS[icon]}
+      </svg>
+      {label}
+    </button>
   );
 }

@@ -13,6 +13,8 @@
 	"observability": { "enabled": true },
 	// Supabase Postgres (project SmallStore, Frankfurt) through the pooler, as the role
 	// smallstore_worker; caching off. In `npm run dev` the same binding points at the local stack.
+	// Product photos (cutouts, studio and AI photos), written by /api/media, served by /media/...
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "smallstore-media" }],
 	"hyperdrive": [
 		{
 			"binding": "HYPERDRIVE",

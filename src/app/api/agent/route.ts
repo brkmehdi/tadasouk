@@ -91,6 +91,12 @@ const TOOLS = [
   ),
   fn("remove_product", "Remove a product from the store.", { product_id: ref }, ["product_id"]),
   fn(
+    "publish_products",
+    "Put products online in the public store, or take them off ('mets en ligne', 'publie', 'activez ces produits', 'tl3o', 'khrjo f lboutique', 'retire de la boutique'). all=true for every product filmed in this session; otherwise product_ids (the current product when the merchant says this one; the products they name or just showed when they say these). online=false takes them off.",
+    { product_ids: { type: "array", items: ref }, all: { type: "boolean" }, online: { type: "boolean" } },
+    ["online"],
+  ),
+  fn(
     "next_product",
     "The merchant is done with this product and will show the next one ('produit suivant', 'next', 'lli mn b3d', 'jib lakhor').",
     {},

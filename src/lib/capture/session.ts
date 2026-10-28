@@ -63,6 +63,7 @@ export type Product = {
   quantity: number | null;
   question: string | null;
   status: "active" | "failed" | "removing";
+  online: boolean; // in the public store; every product starts as a draft
   photos: "idle" | "loading" | "error"; // AI studio photos
   priceCheck: PriceCheck | null;
   capturedAt: number;
@@ -163,6 +164,7 @@ export function agentView(state: SessionState) {
       description: p.description,
       photos: p.images.length,
       suggestedPrice: suggestedPrice(p),
+      online: p.online,
     })),
     openQuestion: (() => {
       const cur = list.find((p) => p.id === state.currentId);
@@ -197,6 +199,7 @@ function blank(state: SessionState, id: string): Product {
     quantity: null,
     question: null,
     status: "active",
+    online: false,
     photos: "idle",
     priceCheck: null,
     capturedAt: Date.now(),
@@ -346,6 +349,14 @@ export function applyCalls(state: SessionState, calls: ToolCall[], newId: () => 
     }
     if (name === "next_product") {
       effects.push({ kind: "next_product", productId: s.currentId ?? "" });
+      continue;
+    }
+    if (name === "publish_products") {
+      // "mets en ligne", "activez ces produits", "tl3o kamlin": several products at once.
+      const online = args.online !== false;
+      const ids = Array.isArray(args.product_ids) ? args.product_ids.filter((x): x is string => typeof x === "string") : [];
+      const targets = args.all === true ? visible(s) : (ids.length ? ids : [s.currentId]).map((id) => s.products.find((p) => p.id === id && p.status !== "removing"));
+      for (const p of targets) if (p && p.online !== online) update(p.id, { online });
       continue;
     }
     if (name === "ask_merchant") {
