@@ -4,6 +4,10 @@
 # Meta Model API key (dev.meta.ai). Server only, never sent to the browser.
 MODEL_API_KEY=
 
+# Signs the admin page's links to filming videos (/media/captures/...). Any long random string,
+# e.g. `openssl rand -hex 32`. In production: `npx wrangler secret put MEDIA_LINK_SECRET`.
+MEDIA_LINK_SECRET=
+
 # Postgres for the server in `npm run dev`: the local Supabase stack (`npx supabase start`).
 # In production the HYPERDRIVE binding in wrangler.jsonc replaces it.
 DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres

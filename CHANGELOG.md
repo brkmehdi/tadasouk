@@ -197,3 +197,7 @@ Phase 0, live capture spike.
   parts through `/api/captures` (signed-in merchants only; replaces the signed-URL route, which
   needed storage keys and let anyone upload). `/admin/videos` lists them with the account, store,
   length and size, plays them (with seeking) and downloads them.
+- Video player in `/admin/videos` fixed: through Next.js the Worker read the whole file ahead of the
+  player and ran out of memory (Cloudflare error 1102). A Worker entry (`worker.ts`) now streams
+  `/media/captures/...` straight from R2 with correct byte ranges, behind links signed for the
+  admin page (`MEDIA_LINK_SECRET`, 12 hours); every other request goes to Next.js as before.

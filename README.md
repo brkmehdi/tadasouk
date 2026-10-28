@@ -134,6 +134,7 @@ Other commands: `npm run preview` (production build in the Workers runtime), `np
 | `MODEL_API_KEY` | secret | Meta Model API key. Server only. |
 | `AI_FREE_DAILY_USD`, `DAILY_CAP_USD` | `wrangler.jsonc` vars | Free AI allowance per account per day, and the platform's daily cap. |
 | `DATABASE_URL` | `.dev.vars` (local) | Postgres for the server; in production the `HYPERDRIVE` binding. |
+| `MEDIA_LINK_SECRET` | secret | Signs the admin page's links to filming videos, served by `worker.ts` straight from R2. |
 | `SEND_SMS_HOOK_SECRET` | secret | Verifies the phone codes Supabase Auth hands to `/api/auth/sms-hook`. |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | build env | Supabase project for sign-in in the browser (the key only allows what row level security allows). |
 

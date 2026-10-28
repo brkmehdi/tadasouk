@@ -3,7 +3,8 @@
 	"name": "smallstore",
 	// Cloudflare account "Meta Hackaton"
 	"account_id": "d57fb66226e5bda27248ba2c4d62077a",
-	"main": ".open-next/worker.js",
+	// worker.ts streams the filming videos from R2, then hands every other request to Next.js.
+	"main": "worker.ts",
 	"compatibility_date": "2026-10-20",
 	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
 	"assets": {

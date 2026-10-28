@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useState } from "react";
 import type { Capture } from "@/lib/server/admin";
 
-const src = (key: string) => `/api/admin/captures?key=${encodeURIComponent(key)}`;
 const minutes = (s: number) => `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
 
 export default function Videos({ captures }: { captures: Capture[] }) {
@@ -47,14 +46,14 @@ export default function Videos({ captures }: { captures: Capture[] }) {
                 >
                   {playing === c.key ? "Fermer" : "Regarder"}
                 </button>
-                <a href={`${src(c.key)}&download=1`} className="ui-btn ui-btn-secondary h-8 px-3 text-[13px]">
+                <a href={`${c.url}&download=1`} className="ui-btn ui-btn-secondary h-8 px-3 text-[13px]">
                   Télécharger
                 </a>
               </div>
             </div>
             {playing === c.key && (
               <video
-                src={src(c.key)}
+                src={c.url}
                 controls
                 autoPlay
                 playsInline

@@ -3,6 +3,7 @@
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { currentUser } from "./auth";
+import { signedVideoUrl } from "./video";
 import { withDb } from "./db";
 
 export async function adminUser() {
@@ -48,6 +49,7 @@ export function listAccounts() {
 // Filming sessions kept in R2 by /api/captures, newest first, with the account that filmed them.
 export type Capture = {
   key: string;
+  url: string; // signed for 12 hours
   uploaded: string;
   bytes: number;
   seconds: number;
@@ -58,7 +60,8 @@ export type Capture = {
 };
 
 export async function listCaptures(): Promise<Capture[]> {
-  const media = getCloudflareContext().env.MEDIA;
+  const { MEDIA: media, MEDIA_LINK_SECRET: secret } = getCloudflareContext().env;
+  if (!secret) throw new Error("MEDIA_LINK_SECRET is not set");
   const objects: R2Object[] = [];
   let cursor: string | undefined;
   do {
@@ -81,12 +84,13 @@ export async function listCaptures(): Promise<Capture[]> {
       : [],
   );
 
-  return objects
-    .sort((a, b) => b.uploaded.getTime() - a.uploaded.getTime())
-    .map((o) => {
+  const sorted = objects.sort((a, b) => b.uploaded.getTime() - a.uploaded.getTime());
+  return Promise.all(
+    sorted.map(async (o) => {
       const owner = who.get(o.key.split("/")[2]);
       return {
         key: o.key,
+        url: await signedVideoUrl(o.key, secret),
         uploaded: o.uploaded.toISOString(),
         bytes: o.size,
         seconds: Number(o.customMetadata?.seconds ?? 0),
@@ -95,5 +99,6 @@ export async function listCaptures(): Promise<Capture[]> {
         store: owner?.store ?? null,
         slug: owner?.slug ?? null,
       };
-    });
+    }),
+  );
 }
