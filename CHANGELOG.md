@@ -139,3 +139,10 @@ Phase 0, live capture spike.
 - AI credit per account: the AI routes need a session; each Meta API call is held then charged in
   Postgres ($0.50 free per day, reset at midnight in Morocco, then the prepaid balance), with one
   `api_usage` row per call. `/api/usage` returns what the account has left.
+- Production database: Supabase project SmallStore (Frankfurt, free plan), same migrations, plus
+  a grants migration from the security advisor (the sign-up trigger and `my_store_id()` are not
+  callable by visitors). The Worker reaches it through Hyperdrive (caching off) as its own role
+  `smallstore_worker` (app tables and functions only). Auth settings pushed from
+  `supabase/config.toml` (`[remotes.production]`): site address, 8-character passwords, phone
+  sign-up with the WhatsApp hook on the Worker. Checked live: a phone sign-in request reaches the
+  hook and the code lands in the production database.

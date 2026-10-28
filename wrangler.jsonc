@@ -11,6 +11,15 @@
 		"binding": "ASSETS"
 	},
 	"observability": { "enabled": true },
+	// Supabase Postgres (project SmallStore, Frankfurt) through the pooler, as the role
+	// smallstore_worker; caching off. In `npm run dev` the same binding points at the local stack.
+	"hyperdrive": [
+		{
+			"binding": "HYPERDRIVE",
+			"id": "054070f374924a0ab5733220486cedf3",
+			"localConnectionString": "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+		}
+	],
 	"vars": {
 		"MODEL_API_BASE": "https://api.meta.ai/v1",
 		"R2_BUCKET_NAME": "smallstore-media",

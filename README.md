@@ -107,7 +107,7 @@ npx supabase test db             # row level security and AI credit tests
 npm run dev
 ```
 
-`.env.local` holds `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (from
+`.env.development.local` holds `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (from
 `npx supabase status`); `supabase/.env` holds `SEND_SMS_HOOK_SECRET`, the same value as in
 `.dev.vars`. Phone codes show in the dev server's log until the WhatsApp number is connected.
 

@@ -8,9 +8,9 @@ values
   ('11111111-1111-1111-1111-111111111111', 'a@test.ma', '{"provider":"email"}', '{}', 'authenticated', 'authenticated'),
   ('22222222-2222-2222-2222-222222222222', 'b@test.ma', '{"provider":"google"}', '{"full_name":"Bouchra"}', 'authenticated', 'authenticated');
 
-select is((select count(*)::int from public.profiles), 2, 'a profile per new user');
+select is((select count(*)::int from public.profiles where id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')), 2, 'a profile per new user');
 select is((select signup_method from public.profiles where id = '22222222-2222-2222-2222-222222222222'), 'google', 'sign-up method kept');
-select is((select count(*)::int from public.ai_wallets), 2, 'an AI wallet per new user');
+select is((select count(*)::int from public.ai_wallets where user_id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')), 2, 'an AI wallet per new user');
 
 -- Merchant A opens a store and adds things, as the browser would.
 set local role authenticated;

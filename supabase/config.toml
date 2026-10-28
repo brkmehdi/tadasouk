@@ -429,3 +429,38 @@ enabled = true
 # formatted with uppercase keywords, indent 2, max width 180, trailing commas,
 # and column/key alignment. Set to "null" to emit raw, unformatted SQL.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":180,\"commaStyle\":\"trailing\"}"
+
+# Production project (SmallStore, Frankfurt). `npx supabase config push` applies the settings
+# above with these differences. The hook secret is read from the environment, never committed.
+[remotes.production]
+project_id = "ctxhphcyzkeeivrethbw"
+
+[remotes.production.auth]
+site_url = "https://smallstore.smallstore-app.workers.dev"
+additional_redirect_urls = ["https://smallstore.smallstore-app.workers.dev/**", "http://localhost:3001/**"]
+
+# Keep the hosted defaults for everything the local stack loosens.
+[remotes.production.auth.email]
+enable_confirmations = true
+max_frequency = "1m0s"
+otp_length = 8
+
+[remotes.production.auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+# The send_sms hook sends the codes; no SMS provider in production.
+[remotes.production.auth.sms.twilio]
+enabled = false
+
+[remotes.production.db.pooler]
+default_pool_size = 15
+max_client_conn = 200
+
+[remotes.production.storage.vector]
+enabled = false
+
+[remotes.production.auth.hook.send_sms]
+enabled = true
+uri = "https://smallstore.smallstore-app.workers.dev/api/auth/sms-hook"
+secrets = "env(SEND_SMS_HOOK_SECRET_PROD)"
