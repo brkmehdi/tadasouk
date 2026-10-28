@@ -50,3 +50,7 @@ next-env.d.ts
 
 # private brief, not published
 Requirement.txt
+
+# proof skill: screenshots and videos, and the local test sign-in
+proofs/
+.claude/toolkit.local.json

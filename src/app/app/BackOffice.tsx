@@ -13,6 +13,7 @@ import type { Order } from "@/lib/catalog/orders";
 import { toSessionProduct, type CatalogProduct } from "@/lib/catalog/types";
 import { I18nProvider, useT, type Lang } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase/browser";
+import CountMode from "./CountMode";
 import Guide from "./Guide";
 import HomeTab from "./HomeTab";
 import type { PromoCode, ShippingMethod } from "@/lib/catalog/store-settings";
@@ -64,6 +65,7 @@ function Shell({ store, products, orders, shipping, promos, ai }: Props) {
   const [tab, setTab] = useState<Tab>("home");
   const [camera, setCamera] = useState(false);
   const [selling, setSelling] = useState(false);
+  const [counting, setCounting] = useState(false);
   const captureRef = useRef<CaptureApi>(null);
 
   const openCamera = () => {
@@ -122,7 +124,7 @@ function Shell({ store, products, orders, shipping, promos, ai }: Props) {
             <HomeTab products={products} orders={orders.length} ai={ai} currency={store.currency} onTab={setTab} />
           </>
         )}
-        {tab === "products" && <ProductsTab store={store} products={products} />}
+        {tab === "products" && <ProductsTab store={store} products={products} onCount={() => setCounting(true)} />}
         {tab === "sales" && <SalesTab store={store} orders={orders} products={products} onCounterSale={() => setSelling(true)} />}
         {tab === "settings" && (
           <SettingsTab
@@ -161,7 +163,13 @@ function Shell({ store, products, orders, shipping, promos, ai }: Props) {
         </div>
       </nav>
 
-      {!camera && !selling && <StoreAssistant />}
+      {!camera && !selling && !counting && <StoreAssistant />}
+
+      {counting && (
+        <div className="fixed inset-0 z-50">
+          <CountMode products={products} onExit={() => setCounting(false)} onSaved={() => router.refresh()} />
+        </div>
+      )}
 
       {/* The camera stays mounted so the red button can start it inside its own tap. */}
       <div className={camera ? "fixed inset-0 z-50" : "hidden"}>

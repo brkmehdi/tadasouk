@@ -1,0 +1,21 @@
+{
+  "name": "SmallStore",
+  "base_url": "http://localhost:3001",
+  "live_url": "https://smallstore.smallstore-app.workers.dev",
+  "locale": "fr-FR",
+  "devices": ["mobile", "desktop"],
+  "pages": [
+    { "name": "sign-in", "path": "/connexion" },
+    { "name": "not-found", "path": "/cette-page-n-existe-pas", "status": 404 }
+  ],
+  "overlays": [],
+  "hide": [],
+  "error_text": ["Unhandled Runtime Error", "Application error"],
+  "ignore_console": ["Download the React DevTools"],
+  "proofs_dir": "proofs",
+  "flows_dir": ".claude/flows",
+  "copy": {
+    "sources": [{ "glob": "src/lib/i18n.tsx", "mode": "markup" }],
+    "commands": []
+  }
+}

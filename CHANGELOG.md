@@ -216,3 +216,8 @@ Phase 0, live capture spike.
 - The store that listens (`/api/store-agent`, `StoreAssistant`): spoken or typed requests in the
   back office, done with tools under the merchant's own session, answered aloud, each change
   undoable, deletions confirmed by a button.
+- Stock count from shelf photos (`/api/count`, `CountMode`, Products tab): one photo per shelf,
+  the AI matches the items to a numbered grid of the store's product photos (one cell per colour)
+  and returns a box for each; numbered dots on the photo, counts per product and per colour,
+  wrong dots removed by a tap, − and +, several shelves added up, stock updated on confirmation.
+  Tested on four shop shelves: colours kept apart, products not on the shelf never counted.

@@ -22,7 +22,7 @@ export async function setOnline(store: Store, ids: string[], online: boolean) {
   if (online && !store.published) await db.from("stores").update({ published: true }).eq("id", store.id);
 }
 
-export default function ProductsTab({ store, products }: { store: Store; products: CatalogProduct[] }) {
+export default function ProductsTab({ store, products, onCount }: { store: Store; products: CatalogProduct[]; onCount: () => void }) {
   const { t } = useT();
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
@@ -75,6 +75,20 @@ export default function ProductsTab({ store, products }: { store: Store; product
           </button>
         ))}
       </div>
+
+      {products.length > 0 && (
+        <button type="button" onClick={onCount} className="ui-card mt-3 flex w-full items-center gap-3 p-4 text-start">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand" aria-hidden>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 8h18M3 16h18M6 8V4h3v4M14 8V5h4v3M5 16v-5h3v5M11 16v-4h3v4M17 16v-6h3v6M3 20h18" />
+            </svg>
+          </span>
+          <span>
+            <span className="block text-sm font-medium">{t("count.open")}</span>
+            <span className="block text-xs text-ink-3">{t("count.openHint")}</span>
+          </span>
+        </button>
+      )}
 
       {products.length === 0 ? (
         <p className="mt-8 text-sm text-ink-3">{t("products.empty")}</p>

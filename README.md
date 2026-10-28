@@ -45,6 +45,9 @@ Built so far:
   draft (photos on Cloudflare R2), put online by a button or by voice; categories proposed by
   the AI at capture (reusing the store's own), colours, sizes and sold-out combinations, delivery
   methods, promotion codes; counter sale with the saved products.
+- **Stock count from a shelf photo**: the AI finds the store's products on the photo (each colour
+  apart) and puts a numbered dot on each item; the merchant removes a wrong dot, fixes a count,
+  adds more shelves, then updates the stock.
 - **The store that listens**: a microphone in the back office. The merchant says (or types) what
   to change, in Darija, French, Arabic or English: prices, going online, categories, colours and
   sizes, sold out, delivery, promotion codes, the store's line, a new store photo, or asks about
@@ -80,6 +83,7 @@ screen and the store. This list moves up as each part lands.
 | `muse-spark-1.3` | Live voice agent: turns what the merchant says into tool calls (price, discount, rename, description, stock, remove, undo, next product, questions) | `src/app/api/agent/route.ts` |
 | `muse-spark-1.3` | Names, describes and files each captured product in one of the store's categories | `src/app/api/identify/route.ts` |
 | `muse-spark-1.3` | The store that listens: back office requests turned into tool calls on the store's data, with a spoken answer | `src/app/api/store-agent/route.ts` |
+| `muse-spark-1.3` | Stock count: finds the store's products on a shelf photo, against a numbered grid of the product photos | `src/app/api/count/route.ts` |
 | `muse-spark-1.3` | Finds the whole product under the merchant's finger (hold-to-frame) | `src/app/api/locate/route.ts` |
 | `muse-spark-1.3` | Price check with web search from Morocco: lowest, average, highest, suggested price, sources | `src/app/api/price-check/route.ts` |
 | `muse-spark-1.3` | Quality score of each product photo | `src/app/api/photo-score/route.ts` |
