@@ -1,6 +1,9 @@
 -- Row level security and AI credit. Run with: npx supabase test db
 begin;
-select plan(20);
+select plan(27);
+
+-- How many welcome credits were given before this test (the first 10 accounts get $2).
+create temp table before_welcome as select count(*)::int as n from public.ai_credits where kind = 'welcome';
 
 -- Two merchants, as Supabase Auth would create them (the trigger makes profile + wallet).
 insert into auth.users (id, email, raw_app_meta_data, raw_user_meta_data, aud, role)
@@ -11,6 +14,14 @@ values
 select is((select count(*)::int from public.profiles where id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')), 2, 'a profile per new user');
 select is((select signup_method from public.profiles where id = '22222222-2222-2222-2222-222222222222'), 'google', 'sign-up method kept');
 select is((select count(*)::int from public.ai_wallets where user_id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')), 2, 'an AI wallet per new user');
+select is(
+  (select balance_usd from public.ai_wallets where user_id = '11111111-1111-1111-1111-111111111111'),
+  (select case when n < 10 then 2.000000 else 0 end from before_welcome)::numeric(12, 6),
+  'the first 10 accounts get $2 of AI at sign-up, later ones nothing');
+select is(
+  (select ai_access from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
+  (select case when n < 10 then 'active' else 'pending' end from before_welcome),
+  'later accounts wait for activation');
 
 -- Merchant A opens a store and adds things, as the browser would.
 set local role authenticated;
@@ -39,13 +50,13 @@ select lives_ok(
 -- Merchant B sees none of A's private rows and cannot write into A's store.
 reset role;
 create temp table a_store as select id from public.stores where slug = 'hanout-a';
-grant select on a_store to authenticated;
+grant select on a_store to authenticated, anon;
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"22222222-2222-2222-2222-222222222222","role":"authenticated"}';
 insert into public.stores (owner_id, name, slug) values (auth.uid(), 'Hanout B', 'hanout-b');
 select is((select count(*)::int from public.customers), 0, 'B sees no customer of A');
 select is((select count(*)::int from public.payments), 0, 'B sees no payment of A');
-select is((select count(*)::int from public.products), 0, 'B sees no product of an unpublished store');
+select is((select count(*)::int from public.products where store_id = (select id from a_store)), 0, 'B sees no product of an unpublished store');
 select throws_ok(
   $$ insert into public.products (store_id, name) values ((select id from a_store), 'intrus') $$,
   '42501', null, 'B cannot add a product to A''s store');
@@ -58,11 +69,37 @@ set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","r
 update public.stores set published = true where owner_id = auth.uid();
 reset role;
 set local role anon;
-select is((select count(*)::int from public.products), 1, 'a visitor sees only the published product');
+select is((select count(*)::int from public.products where store_id = (select id from a_store)), 1, 'a visitor sees only the published product');
 select throws_ok($$ select count(*) from public.customers $$, '42501', null, 'a visitor cannot read customers at all');
 reset role;
 
+-- Orders from the storefront: priced by the database from published products only.
+select is(
+  (select total from public.place_order('hanout-a',
+     jsonb_build_array(jsonb_build_object('product_id', (select id from public.products where name = 'Huile d''argan'), 'quantity', 2)),
+     'Salma', '212612345678', 'Fès', '12 rue', 'cod', null)),
+  240.00::numeric, 'an order is priced from the published product (2 x 120)');
+select throws_ok(
+  $$ select * from public.place_order('hanout-a',
+       jsonb_build_array(jsonb_build_object('product_id', (select id from public.products where name = 'Brouillon'), 'quantity', 1)),
+       'Salma', '212612345678', 'Fès', '12 rue', 'cod', null) $$,
+  'P0400', null, 'a draft cannot be ordered');
+select throws_ok(
+  $$ select * from public.place_order('no-such-store', '[]'::jsonb, 'S', '2126', 'F', 'r', 'cod', null) $$,
+  'P0404', null, 'an unknown or offline store takes no order');
+
+-- Activation by the owner gives the $2 once.
+update public.ai_wallets set balance_usd = 0 where user_id = '22222222-2222-2222-2222-222222222222';
+delete from public.ai_credits where user_id = '22222222-2222-2222-2222-222222222222';
+update public.profiles set ai_access = 'pending' where id = '22222222-2222-2222-2222-222222222222';
+select ok(public.ai_activate('22222222-2222-2222-2222-222222222222', null), 'activating gives the welcome credit');
+select is(
+  (select balance_usd from public.ai_wallets where user_id = '22222222-2222-2222-2222-222222222222')
+  + case when public.ai_activate('22222222-2222-2222-2222-222222222222', null) then 100 else 0 end,
+  2.000000::numeric(12, 6), 'a second activation adds nothing');
+
 -- AI credit, as the server calls it: 0.50 free per day, then the balance, then refused.
+update public.ai_wallets set balance_usd = 0 where user_id = '11111111-1111-1111-1111-111111111111';
 select ok(public.ai_reserve('11111111-1111-1111-1111-111111111111', 's1', 'muse-image-1.0', 't', 0.40, 0.50) > 0, 'a call within the free allowance is held');
 select is(
   (select round(free_left, 2) from public.ai_settle(

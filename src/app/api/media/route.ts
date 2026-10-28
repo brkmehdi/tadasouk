@@ -1,6 +1,7 @@
-// Product photos to R2. The browser sends the image bytes of one photo; it lands in the folder of
-// the signed-in merchant's own store, stores/{store}/{product}/{image}.{ext}, and /media/... serves
-// it. The names are random ids, so a photo is only found through its product.
+// Photos to R2. The browser sends the image bytes of one photo; it lands in the folder of the
+// signed-in merchant's own store: stores/{store}/{product}/{image}.{ext} for a product photo,
+// stores/{store}/hero/{image}.{ext} for the store's banner (?kind=hero). /media/... serves them;
+// the names are random ids, so a photo is only found through its product or store.
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
@@ -15,11 +16,12 @@ export async function POST(req: Request) {
   try {
     const user = await requireUser();
     const url = new URL(req.url);
-    const product = url.searchParams.get("product") ?? "";
+    const hero = url.searchParams.get("kind") === "hero";
+    const product = hero ? "hero" : (url.searchParams.get("product") ?? "");
     const image = url.searchParams.get("image") ?? "";
     const type = (req.headers.get("content-type") ?? "").split(";")[0].trim();
     const ext = TYPES[type];
-    if (!UUID.test(product) || !UUID.test(image) || !ext) {
+    if (!(hero || UUID.test(product)) || !UUID.test(image) || !ext) {
       return NextResponse.json({ error: "bad_request" }, { status: 400 });
     }
     const body = await req.arrayBuffer();

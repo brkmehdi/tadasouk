@@ -4,6 +4,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { ORDER_COLUMNS, type Order } from "@/lib/catalog/orders";
 import { PRODUCT_COLUMNS, type CatalogProduct } from "@/lib/catalog/types";
 import { LANG_COOKIE, readLang } from "@/lib/lang";
 import { currentUser, serverSupabase } from "@/lib/server/auth";
@@ -20,15 +21,18 @@ export default async function AppPage() {
 
   const { data: store } = await db
     .from("stores")
-    .select("id, name, slug, city, whatsapp, currency, published, cod_enabled, card_enabled, credit_enabled")
+    .select("id, name, slug, city, whatsapp, currency, published, cod_enabled, card_enabled, credit_enabled, tagline, hero_key")
     .eq("owner_id", user.id)
     .maybeSingle<Store>();
   if (!store) return <Onboarding userId={user.id} phone={user.phone} />;
 
-  const [{ data: products }, { count: orders }] = await Promise.all([
+  const [{ data: products }, { data: orders }, { data: profile }, { data: wallet }] = await Promise.all([
     db.from("products").select(PRODUCT_COLUMNS).eq("store_id", store.id).neq("status", "archived").order("created_at", { ascending: false }),
-    db.from("orders").select("id", { count: "exact", head: true }).eq("store_id", store.id),
+    db.from("orders").select(ORDER_COLUMNS).eq("store_id", store.id).order("created_at", { ascending: false }).limit(100),
+    db.from("profiles").select("ai_access").eq("id", user.id).maybeSingle<{ ai_access: "pending" | "active" }>(),
+    db.from("ai_wallets").select("balance_usd").eq("user_id", user.id).maybeSingle<{ balance_usd: number }>(),
   ]);
+  const ai = { pending: profile?.ai_access !== "active", balance: Number(wallet?.balance_usd ?? 0) };
 
-  return <BackOffice store={store} products={(products ?? []) as CatalogProduct[]} orders={orders ?? 0} lang={lang} />;
+  return <BackOffice store={store} products={(products ?? []) as CatalogProduct[]} orders={(orders ?? []) as Order[]} ai={ai} lang={lang} />;
 }

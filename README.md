@@ -30,9 +30,12 @@ Built so far:
 - **Merchant accounts**: "Continuer avec Google", or an email with a password, or a phone number
   with a code sent on WhatsApp (the merchant writes first, so the reply with the code is free).
   A first visit names the store; the back office opens on the red record button.
-- **AI credit per account**: every Meta Model API call is charged to the signed-in account,
-  $0.50 free per day (reset at midnight in Morocco), then a prepaid balance; a platform daily cap
-  stays as a safety net. One usage row per call.
+- **AI credit per account**: every Meta Model API call is charged to the signed-in account: $2
+  given once at sign-up to the first 10 accounts, later accounts activated by the owner in
+  `/admin`; a platform daily cap stays as a safety net. One usage row per call.
+- **Public store** at `/{slug}`: hero photo (uploaded or made by muse-image-1.0), product pages
+  with WhatsApp previews (Open Graph) and schema.org Product data, basket, cash-on-delivery order
+  priced by the database; the merchant previews drafts and handles orders in the back office.
 - **Merchant back office**: a shop menu (home, products, sales, settings) with the red record
   button in the middle, French and English, a first-visit guide; every filmed product saved as a
   draft (photos on Cloudflare R2), put online by a button or by voice; counter sale with the
@@ -41,9 +44,9 @@ Built so far:
   their own store, visitors only see what is published; tested in `supabase/tests/`.
 - **Design kit** (`design-kit/`): design system, tokens, screenshots and a build prompt.
 
-Planned for the rest of the event, **not built yet**: polish pass, storefront, orders and
-shipping in the back office, order confirmation flow, card payments through TChenTChen, credit
-book and installment reminders, AI credit top-ups, English on the camera screen. This list moves up as each
+Planned for the rest of the event, **not built yet**: polish pass, shipping fees, card
+payments through TChenTChen, credit book and installment reminders, AI credit top-ups, English on
+the camera screen and the store. This list moves up as each
 part lands.
 
 ## Preexisting components (not part of this submission)
@@ -73,6 +76,7 @@ part lands.
 | `sam-3.1` | Product segmentation (the mask is decoded and composited on the phone in `src/lib/capture/cutout.ts`) | `src/app/api/segment/route.ts` |
 | `muse-image-1.0` | Studio photo: new background and shadow, the real product pasted back | `src/app/api/studio-photo/route.ts` |
 | `muse-image-1.0` | Three photos of the product from other angles | `src/app/api/better-photos/route.ts` |
+| `muse-image-1.0` | The store's hero photo, on request | `src/app/api/store-hero/route.ts` |
 | `muse-voice-transcribe-1.0` | Transcription of short speech chunks for the captions and the agent | `src/app/api/transcribe/route.ts` |
 
 All of these go through `src/lib/server/meta.ts`, which adds the API key on the server and

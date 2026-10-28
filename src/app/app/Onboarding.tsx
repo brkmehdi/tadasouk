@@ -42,7 +42,8 @@ export default function Onboarding({ userId, phone }: { userId: string; phone?: 
         router.refresh();
         return;
       }
-      if (error.code !== "23505") break;
+      // 23505: the link is taken; 23514: it is one of the app's own pages (supabase/migrations).
+      if (error.code !== "23505" && error.code !== "23514") break;
     }
     setError("Ça n'a pas marché. Réessayez.");
     setBusy(false);
@@ -60,7 +61,7 @@ export default function Onboarding({ userId, phone }: { userId: string; phone?: 
             Nom de la boutique
           </label>
           <input id="name" className="ui-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} required autoFocus />
-          {name.trim() && <p className="mt-1.5 text-xs text-ink-3">Votre lien : /b/{toSlug(name)}</p>}
+          {name.trim() && <p className="mt-1.5 text-xs text-ink-3">Votre lien : /{toSlug(name)}</p>}
         </div>
         <div>
           <label className="ui-label" htmlFor="city">

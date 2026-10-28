@@ -101,7 +101,13 @@ export function errorResponse(err: unknown) {
   }
   if (err instanceof AiCreditError) {
     return NextResponse.json(
-      { error: "ai_credit", availableUsd: err.availableUsd, message: "Votre crédit IA est épuisé. Rechargez 10 $ pour continuer." },
+      {
+        error: err.pending ? "ai_pending" : "ai_credit",
+        availableUsd: err.availableUsd,
+        message: err.pending
+          ? "L'IA de votre compte attend son activation. Nous vous prévenons dès qu'elle est prête."
+          : "Votre crédit IA est épuisé. Écrivez-nous pour le recharger.",
+      },
       { status: 402 },
     );
   }

@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import CaptureScreen, { type CaptureApi } from "@/app/capture/CaptureScreen";
 import SellMode from "@/app/capture/SellMode";
+import type { Order } from "@/lib/catalog/orders";
 import { toSessionProduct, type CatalogProduct } from "@/lib/catalog/types";
 import { I18nProvider, useT, type Lang } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase/browser";
@@ -29,11 +30,15 @@ export type Store = {
   cod_enabled: boolean;
   card_enabled: boolean;
   credit_enabled: boolean;
+  tagline: string | null;
+  hero_key: string | null;
 };
 
 export type Tab = "home" | "products" | "sales" | "settings";
 
-type Props = { store: Store; products: CatalogProduct[]; orders: number; lang: Lang };
+export type AiCredit = { pending: boolean; balance: number };
+
+type Props = { store: Store; products: CatalogProduct[]; orders: Order[]; ai: AiCredit; lang: Lang };
 
 export default function BackOffice(props: Props) {
   return (
@@ -43,7 +48,7 @@ export default function BackOffice(props: Props) {
   );
 }
 
-function Shell({ store, products, orders }: Props) {
+function Shell({ store, products, orders, ai }: Props) {
   const { t, lang, setLang } = useT();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("home");
@@ -73,6 +78,18 @@ function Shell({ store, products, orders }: Props) {
             {store.published ? t("header.online") : t("header.offline")}
           </p>
         </div>
+        <a
+          href={`/${store.slug}`}
+          target="_blank"
+          rel="noopener"
+          aria-label={t("settings.viewStore")}
+          className="flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium text-brand hover:bg-soft"
+        >
+          {t("settings.viewStore")}
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+            <path d="M4.5 2.5h5v5M9.5 2.5 3 9" />
+          </svg>
+        </a>
         <div className="flex rounded-md bg-soft p-0.5 text-xs font-medium" role="group" aria-label={t("settings.language")}>
           {(["fr", "en"] as const).map((l) => (
             <button
@@ -92,11 +109,11 @@ function Shell({ store, products, orders }: Props) {
         {tab === "home" && (
           <>
             <Guide products={products} onRecord={openCamera} />
-            <HomeTab products={products} orders={orders} currency={store.currency} onTab={setTab} />
+            <HomeTab products={products} orders={orders.length} ai={ai} currency={store.currency} onTab={setTab} />
           </>
         )}
         {tab === "products" && <ProductsTab store={store} products={products} />}
-        {tab === "sales" && <SalesTab orders={orders} products={products} onCounterSale={() => setSelling(true)} />}
+        {tab === "sales" && <SalesTab store={store} orders={orders} products={products} onCounterSale={() => setSelling(true)} />}
         {tab === "settings" && (
           <SettingsTab
             store={store}

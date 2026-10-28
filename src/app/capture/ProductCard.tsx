@@ -137,7 +137,6 @@ export function PriceChip({ value, currency }: { value: number; currency: string
   );
 }
 
-export function formatPrice(v: number, currency: string) {
-  const n = Number.isInteger(v) ? String(v) : v.toFixed(2);
-  return currency === "EUR" ? `${n} €` : `${n} DH`;
-}
+import { formatPrice } from "@/lib/money";
+
+export { formatPrice };

@@ -3,7 +3,8 @@
 // Every call goes through `reserve()` before it is sent and `settle()` after it returns.
 //   - Per account (Postgres, supabase/migrations): `reserve()` holds the call's worst-case cost
 //     and refuses it when the account has not enough left: the free allowance of the day
-//     (AI_FREE_DAILY_USD, reset at midnight in Morocco) plus its prepaid balance. `settle()`
+//     (AI_FREE_DAILY_USD, reset at midnight in Morocco; 0 since 2026-10-28) plus its balance
+//     ($2 welcome credit, given at sign-up to the first 10 accounts, then by the owner in /admin). `settle()`
 //     charges the real cost, free allowance first, and keeps one `api_usage` row per call; it
 //     writes after the response is sent, so no answer waits for the database.
 //   - Whole platform: a daily cap in isolate memory (DAILY_CAP_USD) stays as a safety net.
@@ -49,8 +50,11 @@ export class SpendingCapError extends Error {
 }
 
 export class AiCreditError extends Error {
-  constructor(readonly availableUsd: number) {
-    super("AI credit used up");
+  constructor(
+    readonly availableUsd: number,
+    readonly pending: boolean, // the account waits for the owner to activate it
+  ) {
+    super(pending ? "AI not activated yet" : "AI credit used up");
   }
 }
 
@@ -111,7 +115,11 @@ export async function reserve(
     });
   } catch (err) {
     if (err instanceof postgres.PostgresError && err.code === "P0402") {
-      throw new AiCreditError(Number(err.detail ?? 0));
+      const pending = await withDb(async (sql) => {
+        const [row] = await sql<{ ai_access: string }[]>`select ai_access from public.profiles where id = ${ctx.userId}::uuid`;
+        return row?.ai_access === "pending";
+      }).catch(() => false);
+      throw new AiCreditError(Number(err.detail ?? 0), pending);
     }
     throw err;
   }

@@ -3,7 +3,7 @@
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 
-const KEY = /^stores\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|png|webp)$/;
+const KEY = /^stores\/[0-9a-f-]{36}\/([0-9a-f-]{36}|hero)\/[0-9a-f-]{36}\.(jpg|png|webp)$/;
 
 export async function GET(_req: Request, { params }: { params: Promise<{ key: string[] }> }) {
   const key = (await params).key.join("/");

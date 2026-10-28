@@ -174,3 +174,22 @@ Phase 0, live capture spike.
 - Products tab: filters (all, drafts, online), edit name, price, stock and description, delete.
   Sales tab: counter sale with the saved products (stock goes down). Settings: name, city,
   WhatsApp, cash on delivery and customer credit switches, language, sign out.
+- AI credit policy (owner's choice): every new account gets $2 of AI once, automatically for the
+  first 10 accounts; later accounts wait until the owner activates them in `/admin` (which gives
+  the same $2). No daily free allowance any more. The back office shows the credit left, or that
+  the account waits for activation; the AI routes say which of the two stopped a call.
+- `/admin` (platform owner only): every account with its sign-up method, store, products, AI
+  balance and spend; "Activer (2 $)" and "Offrir" (more credit).
+- Public store at `/{slug}` (a path for now; a subdomain per store needs our own domain):
+  hero photo (uploaded, made by muse-image-1.0 on request, or none: the store's name), tagline,
+  product grid, product page with photos, add to basket, "Partager sur WhatsApp". Product pages
+  carry Open Graph tags (WhatsApp shows the photo, name, price and description) and schema.org
+  Product data. The merchant, signed in, previews drafts with a preview bar.
+- Basket and order: cash on delivery (and credit when the store allows it); the database prices
+  the order from the published products (`place_order`), numbers it per store and keeps the
+  customer. The confirmation offers to write to the seller on WhatsApp.
+- Back office: orders in Sales (confirm, shipped, delivered and paid with the cash payment
+  recorded, cancel; WhatsApp and call the customer); photos of a saved product (add from the
+  phone, remove, choose the cover), preview and WhatsApp share in the product editor; store look
+  in Settings (hero photo, AI hero, tagline) and "Voir ma boutique" in the header.
+- 27 database tests (welcome credit, activation, order pricing, drafts not orderable).

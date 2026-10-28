@@ -5,11 +5,11 @@
 import { formatPrice } from "@/app/capture/ProductCard";
 import { coverOf, type CatalogProduct } from "@/lib/catalog/types";
 import { useT } from "@/lib/i18n";
-import type { Tab } from "./BackOffice";
+import type { AiCredit, Tab } from "./BackOffice";
 
-type Props = { products: CatalogProduct[]; orders: number; currency: string; onTab: (t: Tab) => void };
+type Props = { products: CatalogProduct[]; orders: number; ai: AiCredit; currency: string; onTab: (t: Tab) => void };
 
-export default function HomeTab({ products, orders, currency, onTab }: Props) {
+export default function HomeTab({ products, orders, ai, currency, onTab }: Props) {
   const { t } = useT();
   const drafts = products.filter((p) => p.status === "draft").length;
   const online = products.filter((p) => p.status === "published").length;
@@ -17,6 +17,13 @@ export default function HomeTab({ products, orders, currency, onTab }: Props) {
 
   return (
     <>
+      {ai.pending ? (
+        <p className="mt-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">{t("home.aiPending")}</p>
+      ) : (
+        <p className="mt-3 text-xs text-ink-3 tabular-nums">
+          {t("home.aiCredit")} {ai.balance.toFixed(2)} $
+        </p>
+      )}
       <section className="mt-4 grid grid-cols-3 gap-2">
         <Stat label={t("home.drafts")} value={drafts} onClick={() => onTab("products")} />
         <Stat label={t("home.online")} value={online} onClick={() => onTab("products")} />

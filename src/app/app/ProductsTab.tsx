@@ -6,6 +6,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { formatPrice } from "@/app/capture/ProductCard";
+import { addPhoto, makeCover, removePhoto } from "@/lib/catalog/photos";
 import { coverOf, mediaUrl, photosOf, type CatalogProduct } from "@/lib/catalog/types";
 import { useT } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase/browser";
@@ -159,12 +160,7 @@ function ProductEditor({ store, p, onClose }: { store: Store; p: CatalogProduct;
           </button>
         </div>
 
-        <div className="no-scrollbar -mx-5 mt-3 flex gap-2 overflow-x-auto px-5">
-          {photosOf(p).map((img) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img key={img.id} src={mediaUrl(img.r2_key)} alt="" className="h-[84px] w-[84px] shrink-0 rounded-md bg-white object-contain ring-1 ring-line" />
-          ))}
-        </div>
+        <Photos store={store} p={p} />
 
         <div className="mt-4 flex flex-col gap-3">
           <label className="block">
@@ -206,6 +202,26 @@ function ProductEditor({ store, p, onClose }: { store: Store; p: CatalogProduct;
           {online ? t("products.unpublish") : t("products.publish")}
         </button>
 
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <a href={`/${store.slug}/${p.id}`} target="_blank" rel="noopener" className="ui-btn ui-btn-secondary h-10">
+            {t("products.preview")}
+          </a>
+          {online ? (
+            <a
+              href={`https://wa.me/?text=${encodeURIComponent(
+                `${p.name}${p.price != null ? ` · ${formatPrice(p.price, store.currency)}` : ""}\n${location.origin}/${store.slug}/${p.id}`,
+              )}`}
+              target="_blank"
+              rel="noopener"
+              className="ui-btn ui-btn-secondary h-10"
+            >
+              {t("products.share")}
+            </a>
+          ) : (
+            <span className="flex items-center text-xs text-ink-3">{t("products.shareDraft")}</span>
+          )}
+        </div>
+
         <div className="mt-3 flex justify-center">
           {confirmDelete ? (
             <div className="flex items-center gap-3 text-sm">
@@ -233,6 +249,81 @@ function ProductEditor({ store, p, onClose }: { store: Store; p: CatalogProduct;
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Photos of a saved product: tap one to make it the cover or remove it; "+ Photo" takes a new one
+// (the phone offers its camera or its gallery).
+function Photos({ store, p }: { store: Store; p: CatalogProduct }) {
+  const { t } = useT();
+  const router = useRouter();
+  const [selected, setSelected] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
+  const photos = photosOf(p);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(false);
+    try {
+      await fn();
+      setSelected(null);
+      router.refresh();
+    } catch {
+      setError(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5">
+        {photos.map((img, i) => (
+          <button
+            key={img.id}
+            type="button"
+            onClick={() => setSelected(selected === img.id ? null : img.id)}
+            className={`relative h-[84px] w-[84px] shrink-0 overflow-hidden rounded-md bg-white ${
+              selected === img.id ? "ring-2 ring-brand" : i === 0 ? "ring-2 ring-ink/80" : "ring-1 ring-line"
+            }`}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={mediaUrl(img.r2_key)} alt="" className="h-full w-full object-contain" />
+            {i === 0 && <span className="ui-badge absolute start-1 bottom-1">{t("products.isCover")}</span>}
+          </button>
+        ))}
+        <label
+          className={`flex h-[84px] w-[84px] shrink-0 cursor-pointer items-center justify-center rounded-md bg-soft text-sm font-medium text-ink-2 ${busy ? "opacity-50" : ""}`}
+        >
+          {busy ? "…" : t("products.addPhoto")}
+          <input
+            type="file"
+            accept="image/*"
+            className="sr-only"
+            disabled={busy}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void run(() => addPhoto(store.id, p, file));
+            }}
+          />
+        </label>
+      </div>
+      {selected && (
+        <div className="mt-2 flex gap-2">
+          {photos[0]?.id !== selected && (
+            <button type="button" disabled={busy} onClick={() => void run(() => makeCover(p, selected))} className="ui-btn ui-btn-secondary h-9 px-3 text-[13px]">
+              {t("products.makeCover")}
+            </button>
+          )}
+          <button type="button" disabled={busy} onClick={() => void run(() => removePhoto(selected))} className="ui-btn h-9 px-3 text-[13px] text-danger hover:bg-soft">
+            {t("products.removePhoto")}
+          </button>
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm text-danger">{t("common.error")}</p>}
     </div>
   );
 }
