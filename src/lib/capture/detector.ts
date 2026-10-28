@@ -18,6 +18,10 @@ export type Box = { x: number; y: number; w: number; h: number }; // video pixel
 
 export type Target = { box: Box; label: string; score: number };
 
+// The GPU delegate can hang without failing on some phones and headless browsers; after this
+// long the CPU one takes over (slower per frame, but auto-capture works).
+const GPU_TIMEOUT_MS = 5000;
+
 export async function createDetector(): Promise<ObjectDetector> {
   const { FilesetResolver, ObjectDetector } = await import("@mediapipe/tasks-vision");
   const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
@@ -29,7 +33,10 @@ export async function createDetector(): Promise<ObjectDetector> {
     categoryDenylist: IGNORED,
   });
   try {
-    return await ObjectDetector.createFromOptions(fileset, options("GPU"));
+    return await Promise.race([
+      ObjectDetector.createFromOptions(fileset, options("GPU")),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("GPU delegate timed out")), GPU_TIMEOUT_MS)),
+    ]);
   } catch {
     return await ObjectDetector.createFromOptions(fileset, options("CPU"));
   }

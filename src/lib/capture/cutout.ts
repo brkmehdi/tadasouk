@@ -85,7 +85,12 @@ function pickTapMask<M extends { bounds: Rect; confidence?: number }>(masks: rea
 
 // Ask muse-spark which whole product is at `point` (pixels of `frame`) and get its box, so SAM
 // cuts out the bottle and not just its label. Null when it cannot tell.
-export async function locateProduct(sessionId: string, frame: HTMLCanvasElement, point: { x: number; y: number }): Promise<Box | null> {
+export async function locateProduct(
+  sessionId: string,
+  frame: HTMLCanvasElement,
+  point: { x: number; y: number },
+  mode: "tap" | "held" = "tap",
+): Promise<(Box & { noun: string }) | null> {
   const W = frame.width;
   const H = frame.height;
   const scale = Math.min(1, 768 / Math.max(W, H));
@@ -101,10 +106,14 @@ export async function locateProduct(sessionId: string, frame: HTMLCanvasElement,
         sessionId,
         image: small.toDataURL("image/jpeg", 0.8),
         point: { x: (point.x / W) * 1000, y: (point.y / H) * 1000 },
+        mode,
       }),
     });
     if (!res.ok) return null;
-    const { result: r } = (await res.json()) as { result: { x_min: number; y_min: number; x_max: number; y_max: number } };
+    const { result: r } = (await res.json()) as {
+      result: { found: boolean; noun: string; x_min: number; y_min: number; x_max: number; y_max: number };
+    };
+    if (!r.found) return null;
     // The box must contain the tap, with a little margin so SAM sees the edges.
     const px = (point.x / W) * 1000;
     const py = (point.y / H) * 1000;
@@ -113,7 +122,7 @@ export async function locateProduct(sessionId: string, frame: HTMLCanvasElement,
     const padY = (r.y_max - r.y_min) * 0.03;
     const x = Math.max(0, ((r.x_min - padX) / 1000) * W);
     const y = Math.max(0, ((r.y_min - padY) / 1000) * H);
-    return { x, y, w: Math.min(W, ((r.x_max + padX) / 1000) * W) - x, h: Math.min(H, ((r.y_max + padY) / 1000) * H) - y };
+    return { x, y, w: Math.min(W, ((r.x_max + padX) / 1000) * W) - x, h: Math.min(H, ((r.y_max + padY) / 1000) * H) - y, noun: r.noun };
   } catch {
     return null;
   }

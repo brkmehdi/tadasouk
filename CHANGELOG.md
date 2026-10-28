@@ -148,3 +148,12 @@ Phase 0, live capture spike.
   hook and the code lands in the production database.
 - Email sign-up no longer waits for a confirmation link during the hackathon (owner's choice): the
   account opens at once. To turn back on once a sender (Resend SMTP) is set up.
+- Auto-capture for any product, not only the 80 kinds the on-device detector knows (bottle,
+  cup...): when the phone is held still on something for about a second, a ring fills in the
+  middle and `/api/locate` (new mode "held") says whether a product is there and where; only then
+  is it cut out. Measured on the test scenes: a tea box (unknown to the detector) now becomes a card
+  4.9 s after opening the camera, where it needed a tap before; a bottle 2.5 s.
+- Auto-capture no longer waits for the detector to load: it can take long on a slow connection,
+  and its GPU start can hang on some phones (now it falls back to the CPU after 5 s). The service
+  worker keeps the detector files (about 17 MB) after the first visit.
+- AI answers no longer wait for the usage write: it runs after the response is sent.

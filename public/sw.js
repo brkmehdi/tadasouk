@@ -1,6 +1,11 @@
-// SmallStore service worker: network first for pages, cache first for built assets,
-// so the record screen opens even on a weak connection.
-const CACHE = "smallstore-v1";
+// SmallStore service worker: network first for pages, cache first for built assets and for
+// the on-device detector (MediaPipe runtime from jsDelivr, model from Google: about 17 MB,
+// downloaded once instead of at every visit), so the record screen opens even on a weak connection.
+const CACHE = "smallstore-v2";
+const DETECTOR_FILES = [
+  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@",
+  "https://storage.googleapis.com/mediapipe-models/",
+];
 const SHELL = ["/", "/capture"];
 
 self.addEventListener("install", (e) => {
@@ -19,7 +24,24 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   const url = new URL(req.url);
-  if (req.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
+  if (req.method !== "GET") return;
+  if (DETECTOR_FILES.some((p) => req.url.startsWith(p))) {
+    e.respondWith(
+      caches.match(req).then(
+        (hit) =>
+          hit ||
+          fetch(req).then((res) => {
+            if (res.ok) {
+              const copy = res.clone();
+              caches.open(CACHE).then((c) => c.put(req, copy));
+            }
+            return res;
+          }),
+      ),
+    );
+    return;
+  }
+  if (url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   if (url.pathname.startsWith("/_next/static/")) {
     e.respondWith(
       caches.match(req).then(

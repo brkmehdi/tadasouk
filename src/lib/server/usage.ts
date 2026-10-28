@@ -4,9 +4,11 @@
 //   - Per account (Postgres, supabase/migrations): `reserve()` holds the call's worst-case cost
 //     and refuses it when the account has not enough left: the free allowance of the day
 //     (AI_FREE_DAILY_USD, reset at midnight in Morocco) plus its prepaid balance. `settle()`
-//     charges the real cost, free allowance first, and keeps one `api_usage` row per call.
+//     charges the real cost, free allowance first, and keeps one `api_usage` row per call; it
+//     writes after the response is sent, so no answer waits for the database.
 //   - Whole platform: a daily cap in isolate memory (DAILY_CAP_USD) stays as a safety net.
 
+import { after } from "next/server";
 import postgres from "postgres";
 import { withDb } from "./db";
 
@@ -122,7 +124,7 @@ export async function settle(
   costUsd: number,
   ok: boolean,
   detail?: Record<string, number | string>,
-): Promise<UsageEntry & { credit: Credit | null }> {
+): Promise<UsageEntry> {
   rollDay();
   platform.totalUsd += costUsd - r.estimateUsd;
   const entry: UsageEntry = {
@@ -137,19 +139,17 @@ export async function settle(
     detail,
   };
   console.log(JSON.stringify({ usage: entry }));
-  let credit: Credit | null = null;
-  try {
-    credit = await withDb(async (sql) => {
-      const [row] = await sql<StatusRow[]>`select * from public.ai_settle(
+  after(() =>
+    withDb(
+      (sql) => sql`select public.ai_settle(
         ${r.usageId}, ${costUsd}::numeric, ${ok}, ${entry.latencyMs}, ${sql.json(detail ?? {})},
-        ${r.ctx.caps.freeDailyUsd}::numeric)`;
-      return row ? toCredit(row, r.ctx.caps) : null;
-    });
-  } catch (err) {
-    // The call already happened; a lost settle only leaves the estimate held for 10 minutes.
-    console.error("usage settle failed", err);
-  }
-  return { ...entry, credit };
+        ${r.ctx.caps.freeDailyUsd}::numeric)`,
+    ).catch((err: unknown) => {
+      // The call already happened; a lost settle only leaves the estimate held for 10 minutes.
+      console.error("usage settle failed", err);
+    }),
+  );
+  return entry;
 }
 
 export async function creditStatus(ctx: AiContext): Promise<Credit> {

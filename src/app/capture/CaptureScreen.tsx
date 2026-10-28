@@ -4,6 +4,7 @@ import type { ObjectDetector } from "@mediapipe/tasks-vision";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ghostCrop, grabKeyframe, locateProduct, segment, SegmentError, type Keyframe } from "@/lib/capture/cutout";
 import { coversCenter, createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
+import { SceneTrigger } from "@/lib/capture/scene";
 import { emptyMetrics, report, type Metrics } from "@/lib/capture/metrics";
 import { innerRegion, signature, similarity, type Signature } from "@/lib/capture/similarity";
 import { betterPhotos, checkPrice, identify, scorePhoto, studioPhoto, webPhotos } from "@/lib/capture/product-actions";
@@ -60,6 +61,9 @@ export default function CaptureScreen() {
   const targetRef = useRef<Target | null>(null);
   const drawBoxRef = useRef<Box | null>(null);
   const triggerRef = useRef(new StillnessTrigger());
+  // For products the detector has no class for: phone still + sharp middle (scene.ts).
+  const sceneRef = useRef(new SceneTrigger());
+  const sceneBusyRef = useRef(false); // asking /api/locate whether a product is in the middle
   const recorderRef = useRef<MediaRecorder | null>(null);
   const voiceRef = useRef<{ stop: () => Promise<void> } | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -112,6 +116,10 @@ export default function CaptureScreen() {
     () => new URLSearchParams(location.search).has("debug"),
     () => false,
   );
+  useEffect(() => {
+    // ?debug: what the scene trigger sees, for tuning (motion, centre and edge sharpness).
+    if (debug) (window as unknown as { __scene?: SceneTrigger }).__scene = sceneRef.current;
+  }, [debug]);
 
   const setSession = useCallback((next: SessionState) => {
     sessionRef.current = next;
@@ -318,6 +326,7 @@ export default function CaptureScreen() {
     (k: Keyframe, label: string | null, mode: "auto" | "voice" | "tap") => {
       const triggeredAt = performance.now();
       lastCaptureAtRef.current = triggeredAt;
+      sceneRef.current.captured(triggeredAt); // wait for the phone to move before the next auto shot
       const crop = signature(k.canvas, innerRegion(k.box));
       const attachTo = sessionRef.current.products.find(
         (p) => p.id === attachIdRef.current && p.status !== "removing",
@@ -446,21 +455,43 @@ export default function CaptureScreen() {
     if (!video || !canvas || video.readyState < 2) return;
     const now = performance.now();
 
-    if (detector && now - lastDetectRef.current >= DETECT_EVERY_MS) {
+    // The scene trigger needs no model, so auto-capture works from the first second; the
+    // detector joins once it has loaded (it can take a while on a slow connection).
+    if (now - lastDetectRef.current >= DETECT_EVERY_MS) {
       lastDetectRef.current = now;
-      const t0 = performance.now();
-      const target = pickTarget(detector, video, now, targetRef.current);
-      const dt = performance.now() - t0;
-      const m = metricsRef.current;
-      m.detectMs.push(dt);
-      if (m.detectMs.length > 300) m.detectMs.shift();
-      targetRef.current = target;
-      if (target && m.firstHighlightMs == null) {
-        m.firstHighlightMs = now - startedAtRef.current;
-        refreshMetrics();
+      let target: Target | null = null;
+      if (detector) {
+        const t0 = performance.now();
+        target = pickTarget(detector, video, now, targetRef.current);
+        const m = metricsRef.current;
+        m.detectMs.push(performance.now() - t0);
+        if (m.detectMs.length > 300) m.detectMs.shift();
+        if (target && m.firstHighlightMs == null) {
+          m.firstHighlightMs = now - startedAtRef.current;
+          refreshMetrics();
+        }
       }
-      if (armedRef.current && !framingRef.current && triggerRef.current.update(target, video.videoWidth, video.videoHeight, now) && target) {
-        capture(grabKeyframe(video, target.box), target.label, "auto");
+      targetRef.current = target;
+      if (armedRef.current && !framingRef.current) {
+        const W = video.videoWidth;
+        const H = video.videoHeight;
+        const centered = !!target && coversCenter(target.box, W, H);
+        if (triggerRef.current.update(target, W, H, now) && target) {
+          capture(grabKeyframe(video, target.box), target.label, "auto");
+        } else if (centered) {
+          sceneRef.current.restart(now);
+        } else if (!sceneBusyRef.current && sceneRef.current.update(video, now)) {
+          // Nothing the detector knows in the middle, but the phone is held still on something:
+          // ask the model whether a product is there and where, then cut out only that.
+          const k = grabKeyframe(video, centerBox(video), { x: W / 2, y: H / 2 });
+          sceneBusyRef.current = true;
+          void locateProduct(sessionIdRef.current, k.canvas, k.point!, "held").then((found) => {
+            sceneBusyRef.current = false;
+            if (!found || !armedRef.current || framingRef.current) return;
+            const { noun, ...box } = found;
+            capture({ ...k, box, point: undefined }, noun, "auto");
+          });
+        }
       }
     }
     const sc = scanRef.current;
@@ -471,8 +502,10 @@ export default function CaptureScreen() {
         .then((code) => code && handleCode(code))
         .finally(() => (sc.busy = false));
     }
-    const show = armedRef.current && !framingRef.current ? targetRef.current : null;
-    draw(canvas, video, show, drawBoxRef, show ? triggerRef.current.progress(now) : 0);
+    const live = armedRef.current && !framingRef.current;
+    const show = live ? targetRef.current : null;
+    const sceneProgress = sceneBusyRef.current ? 1 : sceneRef.current.progress(now);
+    draw(canvas, video, show, drawBoxRef, show ? triggerRef.current.progress(now) : 0, live && !show ? sceneProgress : 0);
   }, [capture, handleCode, refreshMetrics]);
 
   // ---------- voice: chunk -> transcript -> (cue capture) -> agent -> UI ----------
@@ -1156,6 +1189,7 @@ function draw(
   target: Target | null,
   smooth: React.RefObject<Box | null>,
   progress: number,
+  sceneProgress: number,
 ) {
   const dpr = window.devicePixelRatio || 1;
   const cw = canvas.clientWidth;
@@ -1169,6 +1203,23 @@ function draw(
   ctx.clearRect(0, 0, cw, ch);
   if (!target) {
     smooth.current = null;
+    // Held still on a product the detector does not know: a ring fills in the middle.
+    if (sceneProgress > 0) {
+      ctx.save();
+      ctx.lineWidth = 4;
+      ctx.lineCap = "round";
+      ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
+      ctx.shadowBlur = 6;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+      ctx.beginPath();
+      ctx.arc(cw / 2, ch / 2, 22, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = "white";
+      ctx.beginPath();
+      ctx.arc(cw / 2, ch / 2, 22, -Math.PI / 2, -Math.PI / 2 + sceneProgress * Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     return;
   }
   const prev = smooth.current;
