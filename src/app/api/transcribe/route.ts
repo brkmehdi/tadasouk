@@ -2,7 +2,7 @@
 // with voice activity detection; each clip is one PUSH_TO_TALK turn.
 
 import { NextResponse } from "next/server";
-import { errorResponse, metaFetch, serverEnv } from "@/lib/server/meta";
+import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
 import { PRICES, reserve, settle } from "@/lib/server/usage";
 
 const MAX_BYTES = 32_000 * 30 + 44; // 30 s of 16 kHz 16-bit mono, plus the WAV header
@@ -20,9 +20,8 @@ export async function POST(req: Request) {
   const seconds = (audio.byteLength - 44) / 32_000;
 
   try {
-    const { caps } = serverEnv();
-    const r = reserve(
-      caps,
+    const ctx = await aiContext();
+    const r = await reserve(ctx,
       sessionId,
       "muse-voice-transcribe-1.0",
       "/asr/transcribe",
@@ -54,12 +53,12 @@ export async function POST(req: Request) {
       });
       const data = (await res.json()) as { transcript?: string; audioDurationMs?: number };
       const billedSeconds = Math.floor((data.audioDurationMs ?? seconds * 1000) / 1000);
-      const entry = settle(r, billedSeconds * PRICES["muse-voice-transcribe-1.0"].second, true, {
+      const entry = await settle(r, billedSeconds * PRICES["muse-voice-transcribe-1.0"].second, true, {
         audioMs: data.audioDurationMs ?? 0,
       });
       return NextResponse.json({ transcript: data.transcript ?? "", latencyMs: entry.latencyMs });
     } catch (err) {
-      settle(r, 0, false);
+      await settle(r, 0, false);
       throw err;
     }
   } catch (err) {

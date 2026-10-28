@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { readBarcode, warmUpBarcodes } from "@/lib/capture/barcode";
 import { cover, displayName, type Product } from "@/lib/capture/session";
 import { beep } from "@/lib/capture/sfx";
+import { phoneDigits } from "@/lib/phone";
 import { formatPrice } from "./ProductCard";
 
 type Line = { productId: string; qty: number };
@@ -118,16 +119,10 @@ export default function SellMode({
     const body = rows.map((r) => `${r.qty} × ${displayName(r.p)} — ${formatPrice((r.p.price ?? 0) * r.qty, currency)}`).join("\n");
     return `*Reçu — ${storeName}*\n${date}\n\n${body}\n\n*Total : ${formatPrice(total, currency)}*\nMerci pour votre achat !`;
   };
-  // Moroccan numbers typed as 06… / 07… become 2126… / 2127… for wa.me.
-  const waNumber = () => {
-    const d = phone.replace(/\D/g, "");
-    if (/^0[5-7]\d{8}$/.test(d)) return "212" + d.slice(1);
-    return d.replace(/^00/, "");
-  };
   const finish = (sendReceipt: boolean) => {
     if (!rows.length) return;
     if (sendReceipt) {
-      const to = waNumber();
+      const to = phoneDigits(phone);
       window.open(`https://wa.me/${to}?text=${encodeURIComponent(receipt())}`, "_blank", "noopener");
     }
     onSold(rows.map(({ productId, qty }) => ({ productId, qty })));

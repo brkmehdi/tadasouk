@@ -1,10 +1,16 @@
-// Spend so far for one capture session and for today, plus the latest calls.
+// AI credit of the signed-in account: free allowance left today, prepaid balance, and what can
+// still be spent now (calls in flight are held). The capture screen uses it for the 80% alert.
 
 import { connection, NextResponse } from "next/server";
-import { summary } from "@/lib/server/usage";
+import { aiContext, errorResponse } from "@/lib/server/meta";
+import { creditStatus } from "@/lib/server/usage";
 
-export async function GET(req: Request) {
+export async function GET() {
   await connection();
-  const sessionId = new URL(req.url).searchParams.get("sessionId") ?? undefined;
-  return NextResponse.json(summary(sessionId), { headers: { "Cache-Control": "no-store" } });
+  try {
+    const credit = await creditStatus(await aiContext());
+    return NextResponse.json(credit, { headers: { "Cache-Control": "no-store" } });
+  } catch (err) {
+    return errorResponse(err);
+  }
 }

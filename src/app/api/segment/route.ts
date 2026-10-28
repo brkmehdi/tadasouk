@@ -5,7 +5,7 @@
 
 import { buildObjectPrompt } from "@meta-sam/parser";
 import { NextResponse } from "next/server";
-import { errorResponse, metaFetch, serverEnv } from "@/lib/server/meta";
+import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
 import { PRICES, reserve, settle } from "@/lib/server/usage";
 
 type Body = {
@@ -59,8 +59,8 @@ export async function POST(req: Request) {
   });
 
   try {
-    const { caps } = serverEnv();
-    const r = reserve(caps, sessionId, "sam-3.1", "/responses", PRICES["sam-3.1"].image);
+    const ctx = await aiContext();
+    const r = await reserve(ctx, sessionId, "sam-3.1", "/responses", PRICES["sam-3.1"].image);
     let upstream: Response;
     try {
       upstream = await metaFetch("/responses", {
@@ -84,10 +84,10 @@ export async function POST(req: Request) {
         }),
       });
     } catch (err) {
-      settle(r, 0, false);
+      await settle(r, 0, false);
       throw err;
     }
-    settle(r, PRICES["sam-3.1"].image, true, { width, height });
+    await settle(r, PRICES["sam-3.1"].image, true, { width, height });
     return new Response(upstream.body, {
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
     });

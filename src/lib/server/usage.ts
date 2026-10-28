@@ -1,12 +1,14 @@
-// Spending caps and per-call usage log for the Meta Model API.
+// Spending control and usage log for the Meta Model API.
 //
 // Every call goes through `reserve()` before it is sent and `settle()` after it returns.
-// `reserve()` refuses the call when the worst-case cost would push the capture session
-// or the current UTC day over its cap. `settle()` replaces the estimate with the real cost
-// and writes one log line per call.
-//
-// Phase 0 keeps the ledger in isolate memory and logs to Workers Logs. Phase 1 moves it to
-// the `api_usage` table in Postgres so the caps hold across isolates and restarts.
+//   - Per account (Postgres, supabase/migrations): `reserve()` holds the call's worst-case cost
+//     and refuses it when the account has not enough left: the free allowance of the day
+//     (AI_FREE_DAILY_USD, reset at midnight in Morocco) plus its prepaid balance. `settle()`
+//     charges the real cost, free allowance first, and keeps one `api_usage` row per call.
+//   - Whole platform: a daily cap in isolate memory (DAILY_CAP_USD) stays as a safety net.
+
+import postgres from "postgres";
+import { withDb } from "./db";
 
 // Prices from https://dev.meta.ai/docs/pricing-rate-limits (Standard mode), in US dollars.
 export const PRICES = {
@@ -18,8 +20,14 @@ export const PRICES = {
 
 export type ModelId = keyof typeof PRICES;
 
+export type Caps = { dailyUsd: number; freeDailyUsd: number };
+export type AiContext = { userId: string; caps: Caps };
+
+export type Credit = { freeLeftUsd: number; balanceUsd: number; availableUsd: number; freeDailyUsd: number };
+
 export type UsageEntry = {
   at: string;
+  userId: string;
   sessionId: string;
   model: ModelId;
   endpoint: string;
@@ -29,42 +37,24 @@ export type UsageEntry = {
   detail?: Record<string, number | string>;
 };
 
-type Ledger = {
-  day: string;
-  dayTotal: number;
-  sessions: Map<string, number>;
-  log: UsageEntry[];
-};
-
-const ledger: Ledger = { day: today(), dayTotal: 0, sessions: new Map(), log: [] };
-
-function today() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function rollDay() {
-  const d = today();
-  if (ledger.day !== d) {
-    ledger.day = d;
-    ledger.dayTotal = 0;
-    ledger.sessions.clear();
-    ledger.log = [];
-  }
-}
-
 export class SpendingCapError extends Error {
   constructor(
-    readonly scope: "session" | "day",
     readonly spentUsd: number,
     readonly capUsd: number,
   ) {
-    super(`Spending cap reached for this ${scope}: $${spentUsd.toFixed(4)} of $${capUsd.toFixed(2)}`);
+    super(`Platform spending cap reached for today: $${spentUsd.toFixed(4)} of $${capUsd.toFixed(2)}`);
   }
 }
 
-export type Caps = { sessionUsd: number; dailyUsd: number };
+export class AiCreditError extends Error {
+  constructor(readonly availableUsd: number) {
+    super("AI credit used up");
+  }
+}
 
 export type Reservation = {
+  usageId: number;
+  ctx: AiContext;
   sessionId: string;
   model: ModelId;
   endpoint: string;
@@ -72,39 +62,72 @@ export type Reservation = {
   startedAt: number;
 };
 
-export function reserve(
-  caps: Caps,
+// Platform total for the current UTC day, in this isolate.
+const platform = { day: today(), totalUsd: 0 };
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function rollDay() {
+  const d = today();
+  if (platform.day !== d) {
+    platform.day = d;
+    platform.totalUsd = 0;
+  }
+}
+
+type StatusRow = { free_left: string; balance: string; available: string };
+
+function toCredit(row: StatusRow, caps: Caps): Credit {
+  return {
+    freeLeftUsd: Number(row.free_left),
+    balanceUsd: Number(row.balance),
+    availableUsd: Number(row.available),
+    freeDailyUsd: caps.freeDailyUsd,
+  };
+}
+
+export async function reserve(
+  ctx: AiContext,
   sessionId: string,
   model: ModelId,
   endpoint: string,
   estimateUsd: number,
-): Reservation {
+): Promise<Reservation> {
   rollDay();
-  const sessionSpent = ledger.sessions.get(sessionId) ?? 0;
-  if (ledger.dayTotal + estimateUsd > caps.dailyUsd) {
-    throw new SpendingCapError("day", ledger.dayTotal, caps.dailyUsd);
+  if (platform.totalUsd + estimateUsd > ctx.caps.dailyUsd) {
+    throw new SpendingCapError(platform.totalUsd, ctx.caps.dailyUsd);
   }
-  if (sessionSpent + estimateUsd > caps.sessionUsd) {
-    throw new SpendingCapError("session", sessionSpent, caps.sessionUsd);
+  let usageId: number;
+  try {
+    usageId = await withDb(async (sql) => {
+      const [row] = await sql`select public.ai_reserve(
+        ${ctx.userId}::uuid, ${sessionId}, ${model}, ${endpoint},
+        ${estimateUsd}::numeric, ${ctx.caps.freeDailyUsd}::numeric) as id`;
+      return Number(row.id);
+    });
+  } catch (err) {
+    if (err instanceof postgres.PostgresError && err.code === "P0402") {
+      throw new AiCreditError(Number(err.detail ?? 0));
+    }
+    throw err;
   }
-  // Hold the estimate so concurrent calls in this isolate see it.
-  ledger.dayTotal += estimateUsd;
-  ledger.sessions.set(sessionId, sessionSpent + estimateUsd);
-  return { sessionId, model, endpoint, estimateUsd, startedAt: Date.now() };
+  platform.totalUsd += estimateUsd;
+  return { usageId, ctx, sessionId, model, endpoint, estimateUsd, startedAt: Date.now() };
 }
 
-export function settle(
+export async function settle(
   r: Reservation,
   costUsd: number,
   ok: boolean,
   detail?: Record<string, number | string>,
-): UsageEntry {
+): Promise<UsageEntry & { credit: Credit | null }> {
   rollDay();
-  const delta = costUsd - r.estimateUsd;
-  ledger.dayTotal += delta;
-  ledger.sessions.set(r.sessionId, (ledger.sessions.get(r.sessionId) ?? 0) + delta);
+  platform.totalUsd += costUsd - r.estimateUsd;
   const entry: UsageEntry = {
     at: new Date().toISOString(),
+    userId: r.ctx.userId,
     sessionId: r.sessionId,
     model: r.model,
     endpoint: r.endpoint,
@@ -113,20 +136,27 @@ export function settle(
     ok,
     detail,
   };
-  ledger.log.push(entry);
-  if (ledger.log.length > 500) ledger.log.shift();
   console.log(JSON.stringify({ usage: entry }));
-  return entry;
+  let credit: Credit | null = null;
+  try {
+    credit = await withDb(async (sql) => {
+      const [row] = await sql<StatusRow[]>`select * from public.ai_settle(
+        ${r.usageId}, ${costUsd}::numeric, ${ok}, ${entry.latencyMs}, ${sql.json(detail ?? {})},
+        ${r.ctx.caps.freeDailyUsd}::numeric)`;
+      return row ? toCredit(row, r.ctx.caps) : null;
+    });
+  } catch (err) {
+    // The call already happened; a lost settle only leaves the estimate held for 10 minutes.
+    console.error("usage settle failed", err);
+  }
+  return { ...entry, credit };
 }
 
-export function summary(sessionId?: string) {
-  rollDay();
-  return {
-    day: ledger.day,
-    dayTotalUsd: ledger.dayTotal,
-    sessionTotalUsd: sessionId ? (ledger.sessions.get(sessionId) ?? 0) : undefined,
-    calls: (sessionId ? ledger.log.filter((e) => e.sessionId === sessionId) : ledger.log).slice(-100),
-  };
+export async function creditStatus(ctx: AiContext): Promise<Credit> {
+  return withDb(async (sql) => {
+    const [row] = await sql<StatusRow[]>`select * from public.ai_status(${ctx.userId}::uuid, ${ctx.caps.freeDailyUsd}::numeric)`;
+    return toCredit(row, ctx.caps);
+  });
 }
 
 export function chatCost(usage?: {

@@ -3,7 +3,7 @@
 // even when the finger landed on its label. About 2 s, a fraction of a cent.
 
 import { NextResponse } from "next/server";
-import { errorResponse, responsesJson, serverEnv } from "@/lib/server/meta";
+import { aiContext, errorResponse, responsesJson } from "@/lib/server/meta";
 import { chatCost, PRICES, reserve, settle } from "@/lib/server/usage";
 
 type Body = { sessionId: string; image: string; point: { x: number; y: number } };
@@ -49,9 +49,9 @@ export async function POST(req: Request) {
     `and its bounding box in the 0-1000 range.`;
 
   try {
-    const { caps } = serverEnv();
+    const ctx = await aiContext();
     const p = PRICES["muse-spark-1.3"];
-    const r = reserve(caps, sessionId, "muse-spark-1.3", "/responses locate", 2000 * p.input + 1500 * p.output);
+    const r = await reserve(ctx, sessionId, "muse-spark-1.3", "/responses locate", 2000 * p.input + 1500 * p.output);
     try {
       const { parsed, usage } = await responsesJson<Located>(
         {
@@ -71,13 +71,13 @@ export async function POST(req: Request) {
         "located_product",
         SCHEMA,
       );
-      const entry = settle(r, chatCost(usage), true, { outputTokens: usage.completion_tokens ?? 0 });
+      const entry = await settle(r, chatCost(usage), true, { outputTokens: usage.completion_tokens ?? 0 });
       if (!parsed || !(parsed.x_max > parsed.x_min && parsed.y_max > parsed.y_min)) {
         return NextResponse.json({ error: "not_found" }, { status: 404 });
       }
       return NextResponse.json({ result: parsed, latencyMs: entry.latencyMs });
     } catch (err) {
-      settle(r, 0, false);
+      await settle(r, 0, false);
       throw err;
     }
   } catch (err) {

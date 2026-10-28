@@ -7,7 +7,9 @@
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
-import { SpendingCapError, type Caps } from "./usage";
+import { NotSignedInError, requireUser } from "./auth";
+import { DbNotConfiguredError } from "./db";
+import { AiCreditError, SpendingCapError, type AiContext, type Caps } from "./usage";
 
 export function serverEnv() {
   const env = getCloudflareContext().env;
@@ -15,10 +17,17 @@ export function serverEnv() {
     throw new MissingKeyError();
   }
   const caps: Caps = {
-    sessionUsd: Number(env.SESSION_CAP_USD ?? "0.5"),
     dailyUsd: Number(env.DAILY_CAP_USD ?? "5"),
+    freeDailyUsd: Number(env.AI_FREE_DAILY_USD ?? "0.5"),
   };
   return { env, caps, base: env.MODEL_API_BASE ?? "https://api.meta.ai/v1", key: env.MODEL_API_KEY };
+}
+
+// Every AI route starts here: a signed-in account, and the caps its calls are checked against.
+export async function aiContext(): Promise<AiContext> {
+  const { caps } = serverEnv();
+  const user = await requireUser();
+  return { userId: user.id, caps };
 }
 
 export class MissingKeyError extends Error {
@@ -87,8 +96,21 @@ export async function responsesJson<T>(body: Record<string, unknown>, name: stri
 
 // Maps known failures to JSON the capture screen can show in its caption line.
 export function errorResponse(err: unknown) {
+  if (err instanceof NotSignedInError) {
+    return NextResponse.json({ error: "signed_out", message: "Connectez-vous pour utiliser l'IA." }, { status: 401 });
+  }
+  if (err instanceof AiCreditError) {
+    return NextResponse.json(
+      { error: "ai_credit", availableUsd: err.availableUsd, message: "Votre crédit IA est épuisé. Rechargez 10 $ pour continuer." },
+      { status: 402 },
+    );
+  }
   if (err instanceof SpendingCapError) {
-    return NextResponse.json({ error: "spending_cap", scope: err.scope, message: err.message }, { status: 402 });
+    return NextResponse.json({ error: "spending_cap", message: "L'IA est en pause pour aujourd'hui. Réessayez demain." }, { status: 402 });
+  }
+  if (err instanceof DbNotConfiguredError) {
+    console.error(err.message);
+    return NextResponse.json({ error: "no_database", message: err.message }, { status: 500 });
   }
   if (err instanceof MissingKeyError) {
     return NextResponse.json({ error: "missing_key", message: err.message }, { status: 500 });

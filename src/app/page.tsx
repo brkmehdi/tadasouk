@@ -11,7 +11,7 @@ export default function Home() {
         </p>
       </div>
       <Link
-        href="/capture"
+        href="/app"
         className="flex h-16 w-16 items-center justify-center rounded-full ring-[3px] ring-ink/80"
         aria-label="Filmer"
       >

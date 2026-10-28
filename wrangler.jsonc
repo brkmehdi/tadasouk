@@ -15,7 +15,7 @@
 		"MODEL_API_BASE": "https://api.meta.ai/v1",
 		"R2_BUCKET_NAME": "smallstore-media",
 		// Hard spending caps in US dollars, checked before every Meta Model API call.
-		"SESSION_CAP_USD": "1.50",
+		"AI_FREE_DAILY_USD": "0.50",
 		"DAILY_CAP_USD": "10.00"
 	}
 }

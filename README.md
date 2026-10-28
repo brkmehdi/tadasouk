@@ -27,11 +27,19 @@ Built so far:
 - **Product cards, product sheet and photo preview** with a quality score per photo.
 - **Barcodes**: read from the video and attached to the product.
 - **Sale screen**: scan products at the counter, update stock, send the receipt on WhatsApp.
-- **Spending caps and usage log** on the server for every Meta Model API call.
+- **Merchant accounts**: "Continuer avec Google", or an email with a password, or a phone number
+  with a code sent on WhatsApp (the merchant writes first, so the reply with the code is free).
+  A first visit names the store; the back office opens on the red record button.
+- **AI credit per account**: every Meta Model API call is charged to the signed-in account,
+  $0.50 free per day (reset at midnight in Morocco), then a prepaid balance; a platform daily cap
+  stays as a safety net. One usage row per call.
+- **Database with row level security** (Supabase Postgres): a merchant only reaches the rows of
+  their own store, visitors only see what is published; tested in `supabase/tests/`.
 - **Design kit** (`design-kit/`): design system, tokens, screenshots and a build prompt.
 
-Planned for the rest of the event, **not built yet**: polish pass, storefront, merchant back
-office, order confirmation flow, credit book and installment reminders. This list moves up as each
+Planned for the rest of the event, **not built yet**: saving captured products, polish pass,
+storefront, the rest of the merchant back office (products, orders, shipping), order confirmation
+flow, card payments through TChenTChen, credit book and installment reminders, AI credit top-ups. This list moves up as each
 part lands.
 
 ## Preexisting components (not part of this submission)
@@ -94,8 +102,14 @@ Requirements: Node 20.17+ (or 22.9+), a Meta Model API key from [dev.meta.ai](ht
 ```bash
 npm install
 cp .dev.vars.example .dev.vars   # then put your MODEL_API_KEY in it
+npx supabase start               # local Postgres + Auth in Docker, applies supabase/migrations
+npx supabase test db             # row level security and AI credit tests
 npm run dev
 ```
+
+`.env.local` holds `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (from
+`npx supabase status`); `supabase/.env` holds `SEND_SMS_HOOK_SECRET`, the same value as in
+`.dev.vars`. Phone codes show in the dev server's log until the WhatsApp number is connected.
 
 Open http://localhost:3000/capture (Next.js picks the next free port if 3000 is taken). The camera
 needs HTTPS on any host other than localhost, so test on a phone through a deployed preview or a
@@ -110,7 +124,10 @@ Other commands: `npm run preview` (production build in the Workers runtime), `np
 |---|---|---|
 | `MODEL_API_KEY` | secret | Meta Model API key. Server only. |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | secret | Signs short-lived upload URLs for the raw videos. |
-| `SESSION_CAP_USD`, `DAILY_CAP_USD` | `wrangler.jsonc` vars | Hard spending caps checked before each Meta API call. |
+| `AI_FREE_DAILY_USD`, `DAILY_CAP_USD` | `wrangler.jsonc` vars | Free AI allowance per account per day, and the platform's daily cap. |
+| `DATABASE_URL` | `.dev.vars` (local) | Postgres for the server; in production the `HYPERDRIVE` binding. |
+| `SEND_SMS_HOOK_SECRET` | secret | Verifies the phone codes Supabase Auth hands to `/api/auth/sms-hook`. |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | build env | Supabase project for sign-in in the browser (the key only allows what row level security allows). |
 
 ## License
 

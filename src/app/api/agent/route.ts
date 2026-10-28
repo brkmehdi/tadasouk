@@ -3,7 +3,7 @@
 // the calls to its session state, so this route stays stateless.
 
 import { NextResponse } from "next/server";
-import { errorResponse, metaFetch, serverEnv } from "@/lib/server/meta";
+import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
 import { chatCost, PRICES, reserve, settle } from "@/lib/server/usage";
 
 export type AgentProduct = {
@@ -137,8 +137,8 @@ export async function POST(req: Request) {
   const estimate = ((SYSTEM.length + user.length) / 3 + 1500) * p.input + MAX_COMPLETION_TOKENS * p.output;
 
   try {
-    const { caps } = serverEnv();
-    const r = reserve(caps, sessionId, "muse-spark-1.3", "/chat/completions", estimate);
+    const ctx = await aiContext();
+    const r = await reserve(ctx, sessionId, "muse-spark-1.3", "/chat/completions", estimate);
     try {
       const res = await metaFetch("/chat/completions", {
         method: "POST",
@@ -176,7 +176,7 @@ export async function POST(req: Request) {
         }
         return { name: c.function.name, args };
       });
-      const entry = settle(r, chatCost(data.usage), true, {
+      const entry = await settle(r, chatCost(data.usage), true, {
         promptTokens: data.usage?.prompt_tokens ?? 0,
         completionTokens: data.usage?.completion_tokens ?? 0,
         reasoningTokens: data.usage?.completion_tokens_details?.reasoning_tokens ?? 0,
@@ -184,7 +184,7 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ calls, text: message?.content ?? "", latencyMs: entry.latencyMs });
     } catch (err) {
-      settle(r, 0, false);
+      await settle(r, 0, false);
       throw err;
     }
   } catch (err) {

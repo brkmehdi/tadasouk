@@ -3,7 +3,7 @@
 // Takes the photo itself (data URL) or, for a photo from another site, its public URL.
 
 import { NextResponse } from "next/server";
-import { errorResponse, responsesJson, serverEnv } from "@/lib/server/meta";
+import { aiContext, errorResponse, responsesJson } from "@/lib/server/meta";
 import { chatCost, PRICES, reserve, settle } from "@/lib/server/usage";
 
 type Body = { sessionId: string; image?: string; imageUrl?: string; name?: string | null };
@@ -35,9 +35,9 @@ export async function POST(req: Request) {
   if (!sessionId || (!okImage && !okUrl)) return NextResponse.json({ error: "bad_request" }, { status: 400 });
 
   try {
-    const { caps } = serverEnv();
+    const ctx = await aiContext();
     const p = PRICES["muse-spark-1.3"];
-    const r = reserve(caps, sessionId, "muse-spark-1.3", "/responses photo-score", 2500 * p.input + 1500 * p.output);
+    const r = await reserve(ctx, sessionId, "muse-spark-1.3", "/responses photo-score", 2500 * p.input + 1500 * p.output);
     try {
       const { parsed, usage } = await responsesJson(
         {
@@ -60,11 +60,11 @@ export async function POST(req: Request) {
         "photo_score",
         SCHEMA,
       );
-      const entry = settle(r, chatCost(usage), true, { inputTokens: usage.prompt_tokens ?? 0 });
+      const entry = await settle(r, chatCost(usage), true, { inputTokens: usage.prompt_tokens ?? 0 });
       if (!parsed) return NextResponse.json({ error: "no_result" }, { status: 502 });
       return NextResponse.json({ result: parsed, latencyMs: entry.latencyMs });
     } catch (err) {
-      settle(r, 0, false);
+      await settle(r, 0, false);
       throw err;
     }
   } catch (err) {

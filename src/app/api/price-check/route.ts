@@ -3,7 +3,7 @@
 // lowest, average, highest and a suggested price, with sources.
 
 import { NextResponse } from "next/server";
-import { errorResponse, responsesJson, serverEnv } from "@/lib/server/meta";
+import { aiContext, errorResponse, responsesJson } from "@/lib/server/meta";
 import { chatCost, reserve, settle } from "@/lib/server/usage";
 
 type Body = {
@@ -94,8 +94,8 @@ export async function POST(req: Request) {
     .join(" ");
 
   try {
-    const { caps } = serverEnv();
-    const r = reserve(caps, sessionId, "muse-spark-1.3", "/responses web_search", ESTIMATE_USD);
+    const ctx = await aiContext();
+    const r = await reserve(ctx, sessionId, "muse-spark-1.3", "/responses web_search", ESTIMATE_USD);
     try {
       const { parsed, searches, usage } = await responsesJson(
         {
@@ -115,7 +115,7 @@ export async function POST(req: Request) {
         "price_check",
         SCHEMA,
       );
-      const entry = settle(r, chatCost(usage) + searches * SEARCH_PRICE, true, {
+      const entry = await settle(r, chatCost(usage) + searches * SEARCH_PRICE, true, {
         searches,
         inputTokens: usage.prompt_tokens ?? 0,
       });
@@ -124,7 +124,7 @@ export async function POST(req: Request) {
       }
       return NextResponse.json({ result: parsed, latencyMs: entry.latencyMs });
     } catch (err) {
-      settle(r, 0, false);
+      await settle(r, 0, false);
       throw err;
     }
   } catch (err) {

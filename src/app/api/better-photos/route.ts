@@ -4,7 +4,7 @@
 // for several angles in parallel. The Worker streams the result straight through.
 
 import { NextResponse } from "next/server";
-import { errorResponse, metaFetch, serverEnv } from "@/lib/server/meta";
+import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
 import { PRICES, reserve, settle } from "@/lib/server/usage";
 
 type Body = {
@@ -48,9 +48,9 @@ export async function POST(req: Request) {
   ].join(" ");
 
   try {
-    const { caps } = serverEnv();
+    const ctx = await aiContext();
     const cost = PRICES["muse-image-1.0"].image;
-    const r = reserve(caps, sessionId, "muse-image-1.0", "/images/edits", cost);
+    const r = await reserve(ctx, sessionId, "muse-image-1.0", "/images/edits", cost);
     let upstream: Response;
     try {
       upstream = await metaFetch("/images/edits", {
@@ -68,11 +68,11 @@ export async function POST(req: Request) {
         }),
       });
     } catch (err) {
-      settle(r, 0, false);
+      await settle(r, 0, false);
       throw err;
     }
     // Billed per image actually returned; settled at the requested count (upper bound).
-    settle(r, cost, true, { images: 1, angle });
+    await settle(r, cost, true, { images: 1, angle });
     return new Response(upstream.body, {
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
     });

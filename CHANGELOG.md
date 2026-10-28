@@ -127,3 +127,15 @@ Phase 0, live capture spike.
 - Product tray: with many products the column now scrolls on iPhone (it used to cut the last
   card and not move). It is only as tall as its cards, fades the edge where more cards are
   hidden, and scrolls back to the current card after each capture (`ProductTray.tsx`).
+- Merchant accounts (Supabase Auth): Google, email + password, or phone with a code on WhatsApp.
+  Supabase hands each phone code to `/api/auth/sms-hook` (Standard Webhooks signature checked)
+  instead of sending an SMS; the WhatsApp reply comes in a later step. `/connexion`, store setup
+  on first visit, back office at `/app` with the red record button; `/capture` needs a session.
+- Database (`supabase/migrations`): profiles, stores, products and images, customers, shipping
+  methods, orders and lines, payments, credit book with installment plans, merchant payouts, AI
+  credit. Row level security on every table; 20 pgTAP tests (`supabase/tests`) check that a
+  merchant cannot read another store or make itself admin, and that visitors see only what is
+  published. Local stack with `npx supabase start`.
+- AI credit per account: the AI routes need a session; each Meta API call is held then charged in
+  Postgres ($0.50 free per day, reset at midnight in Morocco, then the prepaid balance), with one
+  `api_usage` row per call. `/api/usage` returns what the account has left.

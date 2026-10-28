@@ -15,8 +15,11 @@
     "@mediapipe/tasks-vision": "^1.1.1",
     "@meta-sam/parser": "^0.1.0",
     "@opennextjs/cloudflare": "^1.20.13",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
     "aws4fetch": "^1.0.20",
     "next": "16.4.3",
+    "postgres": "^3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "zxing-wasm": "3.1.4"

@@ -4,7 +4,7 @@
 // product in the final image is exactly what the camera saw.
 
 import { NextResponse } from "next/server";
-import { errorResponse, metaFetch, serverEnv } from "@/lib/server/meta";
+import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
 import { PRICES, reserve, settle } from "@/lib/server/usage";
 
 type Body = { sessionId: string; image: string; name?: string | null };
@@ -29,9 +29,9 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { caps } = serverEnv();
+    const ctx = await aiContext();
     const cost = PRICES["muse-image-1.0"].image;
-    const r = reserve(caps, sessionId, "muse-image-1.0", "/images/edits studio", cost);
+    const r = await reserve(ctx, sessionId, "muse-image-1.0", "/images/edits studio", cost);
     let upstream: Response;
     try {
       upstream = await metaFetch("/images/edits", {
@@ -51,10 +51,10 @@ export async function POST(req: Request) {
         }),
       });
     } catch (err) {
-      settle(r, 0, false);
+      await settle(r, 0, false);
       throw err;
     }
-    settle(r, cost, true, { images: 1 });
+    await settle(r, cost, true, { images: 1 });
     return new Response(upstream.body, {
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
     });
