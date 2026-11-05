@@ -1,14 +1,118 @@
 # Tadasouk
 
+**Film your products and talk. Your store builds itself.**
+
+[![Watch the 3-minute demo of Tadasouk](https://img.youtube.com/vi/h1okA4JU-Go/maxresdefault.jpg)](https://youtu.be/h1okA4JU-Go)
+
+- Demo video (2 min 57 s): https://youtu.be/h1okA4JU-Go
+- Live app: https://tadasouk.com (sign up, then film a few products)
+- Demo store: https://tadasouk.com/test
+- Built for the Meta Global AI Developer Hackathon 2026, indie track, theme "Build for Your World"
+- Open source under AGPL-3.0
+
 A small merchant in Morocco opens this PWA, presses one big record button, films their products
 and talks. The store builds itself on screen: each product is cut out of the video, prices and
 discounts are set by voice in Darija, French, Arabic or English.
 
-- Live app: https://tadasouk.com (sign up, then film a few products)
-- Demo store: https://tadasouk.com/test
-
 The project was called SmallStore during most of the event; some file names and internal keys
 keep that name.
+
+## At a glance
+
+| | |
+|---|---|
+| **Who it is for** | Small merchants who sell through social media posts and WhatsApp today, starting with Morocco's informal and home-based shops |
+| **What they do** | Film products and talk, as they already do for Instagram. Nothing to type. |
+| **What they get** | A public store with real product photos, names and descriptions in French and Arabic, prices checked against local shops, a checkout, and a back office they run by voice |
+| **Meta models** | Four Meta models through the Meta Model API, for reasoning, segmentation, images and speech: Muse Spark 1.3, SAM 3.1, Muse Image 1.0 and Muse Voice Transcribe 1.0, behind 17 API routes |
+| **Meta platforms** | WhatsApp (receipts, reminders, store sharing with link previews), Instagram Login (video import), Facebook and Instagram ad texts |
+| **State** | Live at tadasouk.com, written from an empty repository during the event |
+
+## The problem
+
+Most small merchants never open an online store. A store builder asks for product photos,
+written descriptions, prices typed one by one, stock numbers, often a registered company and a
+card account. A shop run from home, by one person who also buys, sells, delivers and collects
+payments, gives up at the first form. These merchants keep posting product videos on Instagram
+and Facebook, then answer "Price?" in the comments and take orders on WhatsApp.
+
+The numbers for the first market, Morocco:
+
+- **2.03 million informal production units** in 2023, employing 2.53 million people, with a
+  turnover of 526.9 billion dirhams; only 9.8% of them are affiliated with social security
+  ([HCP, national survey on the informal sector 2023/2024](https://m.hcp.ma/file/244334)).
+- **85.5% of those units have a single job**: one person does everything
+  ([Le360 on the HCP survey](https://fr.le360.ma/economie/secteur-informel-le-diagnostic-detaille-du-hcp_45XPLJ5C4VGBDHERYSMN3CZLPA/)).
+- **Trade is the largest activity: 47% of those units**, about 950,000 informal trading
+  businesses ([Le360 on the HCP survey](https://fr.le360.ma/economie/secteur-informel-le-diagnostic-detaille-du-hcp_45XPLJ5C4VGBDHERYSMN3CZLPA/)).
+- **Neighbourhood shops are 80% of the country's points of sale**, according to the Minister of
+  Industry and Trade ([Hespress](https://fr.hespress.com/400165-modernisation-du-commerce-de-proximite-mezzour-detaille-son-plan.html)).
+- **The buyers are already online**: 35.3 million internet users and 21.3 million social media
+  user identities in January 2025 ([DataReportal, Digital 2025: Morocco](https://datareportal.com/reports/digital-2025-morocco)).
+- **Online card payments stay small**: 28.1 million transactions for 9.6 billion dirhams in 2022
+  ([CMI via Hespress](https://en.hespress.com/60789-60789.html)), next to the 526.9 billion dirhams
+  the informal sector turns over in a year.
+
+The same pattern holds far beyond Morocco: about 2 billion people, over 60% of the world's
+employed population, work in the informal economy ([ILO](https://www.ilo.org/resource/news/more-60-cent-worlds-employed-population-are-informal-economy)),
+and WhatsApp Business passed 200 million monthly active users in 2023 ([LatestLY on Meta's
+announcement](https://www.latestly.com/technology/whatsapp-business-achieves-over-200-million-monthly-active-users-globally-up-from-50-million-back-in-2020-5229566.html)).
+
+## The impact
+
+Tadasouk keeps the merchant's habit (film a product, talk about it) and removes every step they
+gave up on:
+
+- **No typing.** The price, the discount and the stock come from what the merchant says, in
+  Darija, French, Arabic or English. A product goes from the camera to a store card in one take.
+- **Real photos without a studio.** SAM 3.1 cuts the real product out of the video; Muse Image 1.0
+  adds angles the camera did not see, starting from that real photo.
+- **A fair price.** Muse Spark 1.3 searches Moroccan shops and shows the lowest, average and
+  highest price with a suggested price, before the merchant picks one.
+- **Sales the way these merchants sell.** Cash on delivery and credit are first-class, with a
+  credit book and WhatsApp reminders; card payment comes through an existing service.
+- **Stock they can trust.** A shelf photo or a phone fixed over the counter counts the stock, so
+  the store can later list on marketplaces that require accurate stock.
+- **Open source.** Anyone can start the same service in their own country.
+
+## How Meta's models do the work
+
+Every AI call in the product goes to the Meta Model API through one server file
+(`src/lib/server/meta.ts`) that adds the key, checks the merchant's AI credit and the platform's
+daily cap, and logs one usage row per call.
+
+| Meta model | Jobs in the app |
+|---|---|
+| **Muse Spark 1.3** (reasoning, tool calls, image understanding, web search) | Live voice agent with tool calls; the back office that listens; names, descriptions and categories; sales video reading; local price check with web search; stock count from shelf photos; stock camera; hold-to-frame grounding; photo quality score; credit entry by voice; ad texts |
+| **SAM 3.1** (segmentation) | Cuts each product out of the video from the on-device detector's box or a single tap |
+| **Muse Image 1.0** (images) | Product photos from other angles, from the seller's real photo; the store's banner |
+| **Muse Voice Transcribe 1.0** (speech to text) | Turns the merchant's speech into text for the captions and both agents |
+
+The detailed list, with the file behind each call, is in [Meta models used](#meta-models-used).
+
+## The merchant's tools
+
+```mermaid
+flowchart LR
+  A[Film and talk] --> B[Products: cutout, name, price, stock]
+  V[Upload a posted sales video] --> B
+  B --> C[Public store and checkout]
+  C --> D[Orders: cash on delivery, credit, card]
+  D --> E[Credit book and WhatsApp reminders]
+  B --> F[Stock: shelf photo and counter camera]
+  B --> G[Ads, WhatsApp sharing, marketplace feed, search visibility]
+  H[Store that listens: voice changes with undo] --> B
+  H --> C
+```
+
+- **Capture**: live camera with voice, or import of a sales video already posted.
+- **Store**: public store per merchant at `tadasouk.com/{store}`, categories, search, product
+  pages, cart, checkout, order tracking page.
+- **Back office**: orders, products, sales, settings, and a microphone that changes the store
+  by voice with an undo for each change.
+- **Tools**: credit book filled by voice, stock count from shelf photos, stock camera over the
+  counter, ad texts in French, Darija and Arabic, marketplace product feed with a stock safety
+  margin, search and AI visibility (sitemap, robots.txt, llms.txt per store), in-shop QR payment.
 
 ## Built during the hackathon
 
