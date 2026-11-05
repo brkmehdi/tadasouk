@@ -119,7 +119,7 @@ export default function SettingsTab({ store, shipping, promos, onSignOut }: {
         </div>
       </div>
 
-      <button type="button" onClick={onSignOut} className="self-start text-sm text-ink-3">
+      <button type="button" onClick={onSignOut} className="ui-btn ui-btn-secondary h-11 w-full">
         {t("settings.signOut")}
       </button>
       <p className="mt-6 text-center text-xs text-ink-3">{t("settings.dataCredit")}</p>

@@ -5,7 +5,7 @@
 // writes to Tadasouk first, so our answer with the code is free).
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { supabase } from "@/lib/supabase/browser";
 import { displayPhone, looksLikePhone, phoneDigits } from "@/lib/phone";
 
@@ -40,13 +40,8 @@ export default function SignIn({ linkError }: { linkError: boolean }) {
   const digits = phoneDigits(id);
   const creating = step === "create";
 
-  useEffect(() => {
-    void supabase()
-      .auth.getSession()
-      .then(({ data }) => {
-        if (data.session) router.replace("/app");
-      });
-  }, [router]);
+  // No bounce to /app when a session exists: the page shows who is signed in, with
+  // "Se déconnecter", so the merchant can switch accounts (connexion/page.tsx).
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -127,6 +122,8 @@ export default function SignIn({ linkError }: { linkError: boolean }) {
         {step === "start" && (
           <div className="mt-8 flex flex-col gap-3">
             <button type="button" className="ui-btn ui-btn-secondary h-11 w-full" onClick={() => void google()} disabled={busy}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- a static SVG logo */}
+              <img src="/brands/google.svg" alt="" width={18} height={18} className="h-[18px] w-[18px] shrink-0" />
               Continuer avec Google
             </button>
             <button type="button" className="ui-btn ui-btn-primary h-11 w-full" onClick={() => setStep("create")}>
