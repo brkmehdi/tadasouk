@@ -185,6 +185,10 @@ Not finished at the deadline:
 - Ads are written in the app; publishing them waits for the merchant's Meta Ads account.
 - Marketplaces other than the product feed (Jumia, Avito) are shown as coming soon.
 
+After the deadline (2026-11-05), once Tchentchen released its API for custom sites: card payments
+and Tchentchen's checkout run on tadasouk.com in sandbox, and the checkout became the default
+payment page of a store that takes cards. [CHANGELOG.md](CHANGELOG.md) lists these changes apart.
+
 ## Preexisting components (not part of this submission)
 
 Card payments rely on two existing external services. Neither was built during the hackathon,
@@ -203,37 +207,62 @@ Tchentchen account. Tadasouk reaches Stripe only through Tchentchen and never ho
 - **How it is used.** Only through Tchentchen's public API and its browser SDK, written from the
   public documentation (https://app.tchentchen.com/docs/home.html). No Tchentchen code is in this
   repository: the server calls the HTTP API (`src/lib/server/tchentchen.ts`, `src/app/api/pay/`,
-  `src/app/api/tchentchen/`), and the checkout page loads the SDK with a script tag served by
-  Tchentchen (`src/app/[store]/_ui/CardPayment.tsx`).
-  - At checkout, Stripe's card form (drawn by the SDK) sits next to cash on delivery and credit,
-    which stay SmallStore's own. The server creates a payment for the order and gives the page
-    only a client token; a changed total makes a new payment. The order is placed, then the card
-    is charged. If the form cannot load, the buyer pays on Tchentchen's pay page.
+  `src/app/api/tchentchen/`), and the pages load the SDK with a script tag served by Tchentchen.
+  - Checkout mode, the default (`TCHENTCHEN_CHECKOUT_MODE=on`, added after the deadline): the
+    payment page of a store that takes cards is a blank page holding only Tchentchen's checkout,
+    over the whole window on a phone, a tablet or a laptop
+    (`src/app/[store]/_ui/TchentchenCheckout.tsx`). The server sends the cart priced by our
+    database (`/api/pay/checkout`). Tchentchen takes the contact, the address, the delivery
+    choice, the card or cash on delivery, and calls our signed order hook
+    (`/api/pay/order-hook`), which reads the checkout's status and makes one order per checkout.
+    A paid checkout always gets its order: when the store would have refused it (an item sold out
+    meanwhile), the order is made at the price paid and its note tells the seller what to check.
+    If the checkout cannot open, the store's own checkout shows instead.
+  - Payment mode (`TCHENTCHEN_CHECKOUT_MODE=off`): Stripe's card form, drawn by the SDK, sits in
+    the store's own checkout next to cash on delivery and credit
+    (`src/app/[store]/_ui/CardPayment.tsx`). The server creates a payment for the order and gives
+    the page only a client token; a changed total makes a new payment. The order is placed, then
+    the card is charged. If the form cannot load, the buyer pays on Tchentchen's pay page.
   - Tchentchen's events arrive at `/api/pay/webhook`, signed with HMAC-SHA256. The server reads
     the payment back from Tchentchen before it records any money.
   - In the shop, the merchant's phone shows the payment's pay page as a QR code (Outils >
     Encaisser par carte).
-  - Cancelling a paid card order refunds it.
+  - Cancelling a paid card order refunds it, in both modes.
   - The money lands on the Stripe account behind the connected Tchentchen account. SmallStore
     never holds a Stripe key, and Tchentchen's secret key never reaches the browser.
 
-### Card payments with your own Tchentchen account
+### Payments in your own copy: Tchentchen's checkout, sandbox by default
 
-If you run your own copy of SmallStore, connect your own Tchentchen account:
+A fresh copy uses Tchentchen's checkout in sandbox (`wrangler.example.jsonc`): test cards only,
+nothing is charged. To use it with your own Tchentchen account (Tchentchen's guide:
+https://app.tchentchen.com/docs/quickstart.html):
 
-1. In Tchentchen's merchant app, add your site's address as a website. Put the token it shows in
+1. Sign up at https://app.tchentchen.com. In **Websites**, add your site's address and choose
+   **Custom built**. Put the code its card shows (`tchentchen-site-...`) in
    `TCHENTCHEN_VERIFY_TOKEN` and your address in `SITE_URL` (`wrangler.jsonc`), deploy, then click
-   **Check now** in Tchentchen. It reads `https://<your site>/.well-known/tchentchen-verification.txt`.
-2. Set a secret that encrypts the keys: `npx wrangler secret put TCHENTCHEN_KEYS_SECRET` (any long
+   **Check now**. Tchentchen reads `https://<your site>/.well-known/tchentchen-verification.txt`,
+   which `worker.ts` serves.
+2. On the same website card, click **Connect Stripe** in test mode. Switch **Cash on delivery** on
+   if you deliver parcels paid at the door; without it the checkout offers the card only.
+3. Set a secret that encrypts the keys: `npx wrangler secret put TCHENTCHEN_KEYS_SECRET` (any long
    random string, for example from `openssl rand -hex 32`).
-3. Sign in with an admin account (`profiles.role = 'admin'`, set in the database), open
+4. Sign in with an admin account (`profiles.role = 'admin'`, set in the database), open
    `/admin/tchentchen` on your site's address and click **Connect Tchentchen**. Tchentchen sends the
-   test and live keys back once; they are stored encrypted.
-4. `TCHENTCHEN_API_BASE` picks the mode: `https://app.tchentchen.com/api/v1/sandbox` for tests (test
-   card 4242 4242 4242 4242) or `https://app.tchentchen.com/api/v1/live`. Instead of steps 2 and 3
-   you can set the key yourself: `npx wrangler secret put TCHENTCHEN_SECRET_KEY`; it wins over the
-   saved keys.
-5. Each merchant turns card payment on in Réglages. Without a key, no card option shows.
+   test and live keys back once; they are stored encrypted. Instead of steps 3 and 4 you can set
+   the key yourself: `npx wrangler secret put TCHENTCHEN_SECRET_KEY` (`tct_test_...`); it wins
+   over the saved keys.
+5. Each merchant turns card payment on in **Réglages**. The store's payment page is then
+   Tchentchen's checkout, with cash on delivery when it is on both in Tchentchen and in the
+   store's Réglages. Test with the card 4242 4242 4242 4242, any future date, any code.
+6. Going live (Tchentchen's checklist: https://app.tchentchen.com/docs/going-live.html): connect
+   Stripe in live mode on the website card, set `TCHENTCHEN_API_BASE` to
+   `https://app.tchentchen.com/api/v1/live` and deploy. The live key saved by the Connect page is
+   used, or `TCHENTCHEN_SECRET_KEY` set to your `tct_live_...` key. In live mode the order hook
+   and the events refuse test calls.
+
+`TCHENTCHEN_CHECKOUT_MODE=off` keeps the store's own checkout, with Stripe's card form as one of
+its rows. Credit (pay later, from the credit book) is only in the store's own checkout. Without
+any Tchentchen key, stores take cash on delivery and credit only.
 
 ## Meta models used
 
@@ -315,8 +344,9 @@ Other commands: `npm run preview` (production build in the Workers runtime), `np
 | `SEND_SMS_HOOK_SECRET` | secret | Verifies the phone codes Supabase Auth hands to `/api/auth/sms-hook`. |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | build env | Supabase project for sign-in in the browser (the key only allows what row level security allows). |
 | `SITE_URL` | `wrangler.jsonc` vars | The site's address. Card payments work only there: it is the website verified in Tchentchen. |
-| `TCHENTCHEN_API_BASE` | `wrangler.jsonc` vars | Tchentchen's API: `https://app.tchentchen.com/api/v1/sandbox` (test) or `https://app.tchentchen.com/api/v1/live`. |
+| `TCHENTCHEN_API_BASE` | `wrangler.jsonc` vars | Tchentchen's API: `https://app.tchentchen.com/api/v1/sandbox` (test, the default) or `https://app.tchentchen.com/api/v1/live` (real payments). |
 | `TCHENTCHEN_VERIFY_TOKEN` | `wrangler.jsonc` vars | Tchentchen's website check token, served by `worker.ts` at `/.well-known/tchentchen-verification.txt`. Public by design. |
+| `TCHENTCHEN_CHECKOUT_MODE` | `wrangler.jsonc` vars | `on` (the default, also when unset): the payment page of a store that takes cards is Tchentchen's checkout (card, and cash on delivery when it is on for the website in Tchentchen). `off`: the card is a row of the store's own checkout. |
 | `TCHENTCHEN_SECRET_KEY` | secret | Tchentchen secret key (`tct_test_...` or `tct_live_...`), server only; it also verifies Tchentchen's events. When unset, the key saved by the Connect page is used. No key: no card option. |
 | `TCHENTCHEN_KEYS_SECRET` | secret | Encrypts (AES-GCM) the keys the Connect page saves in the database. |
 

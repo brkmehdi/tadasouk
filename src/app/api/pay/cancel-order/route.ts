@@ -7,7 +7,18 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/server/auth";
 import { withDb } from "@/lib/server/db";
-import { cancelPayment, payErrorResponse, recordPaid, recordRefunds, refundPayment, settleOrder, tctConfig, TchentchenNotConfiguredError } from "@/lib/server/tchentchen";
+import {
+  cancelPayment,
+  payErrorResponse,
+  recordPaid,
+  recordRefunds,
+  refundCheckout,
+  refundPayment,
+  settleOrder,
+  tctConfig,
+  TchentchenNotConfiguredError,
+  toMinor,
+} from "@/lib/server/tchentchen";
 
 type Order = { id: string; store_id: string; payment_method: string; payment_status: string; status: string };
 
@@ -45,6 +56,19 @@ export async function POST(req: Request) {
               await recordRefunds(sql, r.payment);
               total += r.refund.amount;
             }
+          }
+          // Checkout mode: the order was paid in Tchentchen's checkout, recorded under its token.
+          const checkouts = await sql<{ id: string; reference: string; amount: string; refunded: string }[]>`
+            select id, reference, amount, refunded from public.payments
+            where order_id = ${o.id}::uuid and provider = 'tchentchen' and reference like 'tct\\_%' and refunded < amount`;
+          const [{ currency }] = await sql<{ currency: string }[]>`select currency from public.orders where id = ${o.id}::uuid`;
+          for (const c of checkouts) {
+            const left = toMinor(c.amount) - toMinor(c.refunded);
+            // One checkout per order (its id is the cart_id): the key stays within the 80 characters allowed.
+            await refundCheckout(cfg, c.reference, left, currency.toLowerCase(), `cancel.${o.id}`);
+            await sql`update public.payments set refunded = amount where id = ${c.id}::uuid`;
+            await sql`update public.orders set payment_status = 'refunded' where id = ${o.id}::uuid`;
+            total += left;
           }
         }
       }

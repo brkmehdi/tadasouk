@@ -215,6 +215,97 @@ export const refundPayment = (cfg: TctConfig, paymentId: string, idempotencyKey:
   });
 
 /* ------------------------------------------------------------------------------------------ */
+/* Checkout mode: Tchentchen's checkout replaces ours (/paiement shows only its frame)         */
+/* ------------------------------------------------------------------------------------------ */
+
+/** Checkout mode is the default: the payment page of a store that takes cards is Tchentchen's
+ *  checkout. TCHENTCHEN_CHECKOUT_MODE=off (wrangler.jsonc) makes the card a row of our own checkout
+ *  instead (payment mode). Without a Tchentchen key, neither shows: our checkout has no card row. */
+export const checkoutModeOn = () =>
+  (getCloudflareContext().env as unknown as { TCHENTCHEN_CHECKOUT_MODE?: string }).TCHENTCHEN_CHECKOUT_MODE?.trim().toLowerCase() !== "off";
+
+export const CHECKOUT_TOKEN = /^tct_[A-Za-z0-9_]{1,200}$/;
+
+// A cart line's ref at Tchentchen: "product:colour:size", read back by the order hook.
+export const lineRef = (l: { product_id: string; color_id: string | null; size: string | null }) => `${l.product_id}:${l.color_id ?? ""}:${l.size ?? ""}`;
+
+export function parseLineRef(ref: string | null, quantity: number) {
+  const [product_id, color_id, size] = (ref ?? "").split(":");
+  if (!UUID.test(product_id ?? "") || (color_id && !UUID.test(color_id)) || !Number.isInteger(quantity) || quantity < 1) return null;
+  return { product_id, quantity, color_id: color_id || null, size: size || null };
+}
+
+export type CheckoutSessionInput = {
+  cart: {
+    cart_id: string;
+    currency: string;
+    prices_include_tax: true;
+    line_items: { platform_product_id: number; ref: string; name: string; quantity: number; unit_amount: number; image_url?: string }[];
+    shipping: { selected_carrier_id: number; options: { carrier_id: number; ref: string; label: string; delay?: string; amount: number }[] };
+    taxes: [];
+    discounts: { label: string; amount: number; free_shipping: boolean }[];
+    customer: { country: string };
+    totals_check: { order_total: number };
+  };
+  // terms_checkbox false: no "I agree to the terms" box (without it and without terms_url, the box links to sample terms).
+  catalog: { ui: { merchant_name: string; cash_on_delivery?: boolean; terms_checkbox?: boolean } };
+  shop: {
+    platform: "custom";
+    base_url: string;
+    success_url: string;
+    cancel_url: string;
+    frame_url: string;
+    locale: string;
+    hooks: { order: string };
+  };
+};
+
+export type CheckoutSession = {
+  token: string;
+  checkout_url: string;
+  session_id: string;
+  expires_at: string;
+  totals_match: boolean;
+  amount_total: number;
+  currency: string;
+};
+
+export type CheckoutState = "paid" | "awaiting" | "failed" | "open" | "expired" | "cash_on_delivery";
+
+export type CheckoutStatus = {
+  payment_state: CheckoutState;
+  amount_total: number;
+  currency: string;
+  payment: { type: string; brand: string | null; last4: string | null; wallet: string | null } | null;
+  customer: { email: string | null; name: string | null; phone: string | null } | null;
+  shipping: {
+    name: string | null;
+    address: { line1: string | null; line2: string | null; city: string | null; postal_code: string | null; state: string | null; country: string | null } | null;
+  } | null;
+  lines: { ref: string | null; platform_product_id: number; quantity: number; unit_amount: number }[];
+  selected_delivery_ref: string | null;
+  /** The discounts on the paid cart (expected), as sent in cart.discounts. */
+  cart_rules?: { expected?: { label: string; amount: number; free_shipping: boolean }[] } | null;
+  cart_id: string;
+  session_id: string;
+};
+
+const token = (t: string) => {
+  if (!CHECKOUT_TOKEN.test(t)) throw new TchentchenError(400, "bad_checkout_token", null);
+  return encodeURIComponent(t);
+};
+
+export const createCheckout = (cfg: TctConfig, input: CheckoutSessionInput) =>
+  call<CheckoutSession>(cfg, "/checkout/session", { method: "POST", body: input });
+
+export const getCheckoutStatus = (cfg: TctConfig, checkoutToken: string) =>
+  call<CheckoutStatus>(cfg, `/checkout/${token(checkoutToken)}/status`, { method: "GET" });
+
+// The key makes a retry return the same refund instead of a second one.
+export const refundCheckout = (cfg: TctConfig, checkoutToken: string, amount: number, currency: string, key: string) =>
+  call<unknown>(cfg, `/checkout/${token(checkoutToken)}/refund`, { method: "POST", body: { amount, currency, key } });
+
+/* ------------------------------------------------------------------------------------------ */
 /* Events                                                                                      */
 /* ------------------------------------------------------------------------------------------ */
 

@@ -6,6 +6,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { adminUser } from "@/lib/server/admin";
+import SignOutButton from "../../SignOutButton";
 import { withDb } from "@/lib/server/db";
 import { listPayments, siteUrl, tctBase, tctConfig, TchentchenError } from "@/lib/server/tchentchen";
 
@@ -77,6 +78,9 @@ export default async function TchentchenPage({ searchParams }: { searchParams: P
         <Link href="/admin" className="text-sm font-medium text-brand">
           Comptes
         </Link>
+        <span className="ms-auto">
+          <SignOutButton />
+        </span>
       </div>
       <p className="mt-1 text-sm text-ink-3">
         Les paiements par carte passent par l&apos;API publique et le SDK de Tchentchen, et arrivent sur le compte Stripe du compte
