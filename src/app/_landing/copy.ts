@@ -28,7 +28,7 @@ export type Copy = {
   start: { h2: string; steps: Item[] };
   faq: { h2: string; items: Faq[] };
   close: { h2: string; sub: string };
-  footer: { tagline: string; demo: string; hackathon: string; rights: string };
+  footer: { tagline: string; demo: string; privacy: string; hackathon: string; rights: string };
 };
 
 const fr: Copy = {
@@ -125,6 +125,7 @@ const fr: Copy = {
   footer: {
     tagline: "Filmez vos produits et parlez. Votre boutique se construit toute seule.",
     demo: "Boutique de démonstration",
+    privacy: "Confidentialité",
     hackathon: "Créé pour le Meta Global AI Developer Hackathon 2026.",
     rights: "Tous droits réservés.",
   },
@@ -224,6 +225,7 @@ const en: Copy = {
   footer: {
     tagline: "Film your products and talk. Your shop builds itself.",
     demo: "Demo shop",
+    privacy: "Privacy",
     hackathon: "Built for the Meta Global AI Developer Hackathon 2026.",
     rights: "All rights reserved.",
   },

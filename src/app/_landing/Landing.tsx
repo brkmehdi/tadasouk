@@ -270,6 +270,9 @@ export default function Landing() {
             <li>
               <Link href={`/${DEMO_SLUG}`}>{c.footer.demo}</Link>
             </li>
+            <li>
+              <Link href="/confidentialite">{c.footer.privacy}</Link>
+            </li>
           </ul>
         </div>
         <div className="tdk-wrap tdk-foot-small">
