@@ -1,8 +1,14 @@
-# SmallStore
+# Tadasouk
 
 A small merchant in Morocco opens this PWA, presses one big record button, films their products
 and talks. The store builds itself on screen: each product is cut out of the video, prices and
 discounts are set by voice in Darija, French, Arabic or English.
+
+- Live app: https://tadasouk.com (sign up, then film a few products)
+- Demo store: https://tadasouk.com/test
+
+The project was called SmallStore during most of the event; some file names and internal keys
+keep that name.
 
 ## Built during the hackathon
 
@@ -21,9 +27,12 @@ Built so far:
 - **Voice agent for pricing and discounts**: short speech chunks are transcribed and an agent
   turns them into actions (set price, discount, rename, description, stock, remove, undo,
   next product) and asks about missing information.
-- **Automatic research per product**: name and description, a studio photo, three AI photos from
-  other angles, photos from shop pages on the web, and a price check against Moroccan shops
-  (lowest, average, highest, suggested price).
+- **Automatic research per product**: name and description, three AI photos from other angles,
+  photos from shop pages on the web, and a price check against Moroccan shops (lowest, average,
+  highest, suggested price).
+- **Sales video import**: the merchant uploads a video they already posted; the products are
+  read from the moments the phone was held still and from what the seller says, and the same
+  product filmed from two sides becomes one product.
 - **Product cards, product sheet and photo preview** with a quality score per photo.
 - **Barcodes**: read from the video and attached to the product.
 - **Sale screen**: scan products at the counter, update stock, send the receipt on WhatsApp.
@@ -37,7 +46,8 @@ Built so far:
   sellers, categories), category pages with sorting and colour/size filters, search, product
   pages (gallery per colour, sizes with sold-out ones greyed, suggestions, WhatsApp previews
   through Open Graph, schema.org Product data), a cart drawer, a cart page with the delivery
-  methods, a two-column checkout (cash on delivery or credit; card later) and a thank-you page.
+  methods, a two-column checkout (cash on delivery, credit, or card through Tchentchen once its
+  keys are set) and a thank-you page.
   The database prices every cart and order (`quote_cart`, `place_order`): colours and sizes,
   delivery free above a threshold, promotion codes.
 - **Merchant back office**: a shop menu (home, products, sales, settings) with the red record
@@ -53,28 +63,76 @@ Built so far:
   sizes, sold out, delivery, promotion codes, the store's line, a new store photo, or asks about
   sales. The store does it and answers aloud; each change can be undone, deletions wait for a
   button.
+- **Back office tools** (`src/app/app/tools/`): a credit book filled by voice ("Ahmed took two
+  bottles of oil for 240 dirhams, he will pay Friday") with WhatsApp reminders; a stock camera
+  fixed over the counter that counts sales and opened deliveries; ad texts for Facebook and
+  Instagram in French, Darija and Arabic; a marketplace product feed with a stock safety margin;
+  search and AI visibility (sitemap, robots.txt, llms.txt per store).
 - **Database with row level security** (Supabase Postgres): a merchant only reaches the rows of
   their own store, visitors only see what is published; tested in `supabase/tests/`.
 - **Design kit** (`design-kit/`): design system, tokens, screenshots and a build prompt.
 
-Planned for the rest of the event, **not built yet**: polish pass, card payments through
-TChenTChen, credit book and installment reminders, AI credit top-ups, English on the camera
-screen and the store. This list moves up as each part lands.
+Not finished at the deadline:
+
+- Card payment through Tchentchen is in the code but switched off in production until its keys
+  are set (Tchentchen's payment API is not released yet).
+- Importing videos straight from an Instagram account needs Meta App Review; until then the
+  merchant uploads the video from the phone.
+- Ads are written in the app; publishing them waits for the merchant's Meta Ads account.
+- Marketplaces other than the product feed (Jumia, Avito) are shown as coming soon.
 
 ## Preexisting components (not part of this submission)
 
-**TChenTChen** is my private payment and checkout service. It existed before the hackathon.
+Card payments rely on two existing external services. Neither was built during the hackathon,
+and neither one's code is in this repository.
 
-- **Why it is used.** Taking card payments means card processing through Stripe Connect, payouts
-  to merchants and legal obligations. These cannot responsibly be rebuilt in nine days. Reusing
-  TChenTChen lets this project focus on what is new: turning a phone video into a working store
-  with Meta's models.
-- **How it is used.** Only through its HTTP API: create a checkout session, redirect the buyer to
-  it, receive signed webhooks. None of its code is in this repository. The storefront that will
-  call it is not built yet, so no TChenTChen call exists in the code today.
-- **Changes made to TChenTChen during the event:**
+**Stripe** is an existing external payment service. It processes the card payments: the card
+form at checkout is Stripe's, and the money lands on the Stripe account behind the connected
+Tchentchen account. Tadasouk reaches Stripe only through Tchentchen and never holds a Stripe key.
 
-  [TO FILL FROM HACKATHON_CHANGES.md]
+**Tchentchen** is my payment service. It existed before the hackathon.
+
+- **Why it is used.** Taking card payments means card processing through Stripe, payouts and
+  legal obligations. These cannot responsibly be rebuilt in nine days. Reusing Tchentchen lets
+  this project focus on what is new: turning a phone video into a working store with Meta's
+  models.
+- **How it is used.** Only through Tchentchen's public API and its browser SDK, written from the
+  public documentation (https://app.tchentchen.com/docs/home.html). No Tchentchen code is in this
+  repository: the server calls the HTTP API (`src/lib/server/tchentchen.ts`, `src/app/api/pay/`,
+  `src/app/api/tchentchen/`), and the checkout page loads the SDK with a script tag served by
+  Tchentchen (`src/app/[store]/_ui/CardPayment.tsx`).
+  - At checkout, Stripe's card form (drawn by the SDK) sits next to cash on delivery and credit,
+    which stay SmallStore's own. The server creates a payment for the order and gives the page
+    only a client token; a changed total makes a new payment. The order is placed, then the card
+    is charged. If the form cannot load, the buyer pays on Tchentchen's pay page.
+  - Tchentchen's events arrive at `/api/pay/webhook`, signed with HMAC-SHA256. The server reads
+    the payment back from Tchentchen before it records any money.
+  - In the shop, the merchant's phone shows the payment's pay page as a QR code (Outils >
+    Encaisser par carte).
+  - Cancelling a paid card order refunds it.
+  - The money lands on the Stripe account behind the connected Tchentchen account. SmallStore
+    never holds a Stripe key, and Tchentchen's secret key never reaches the browser.
+- **Changes made to Tchentchen during the event:** listed in Tchentchen's `HACKATHON-CHANGES.md`.
+
+  [TO FILL FROM HACKATHON-CHANGES.md]
+
+### Card payments with your own Tchentchen account
+
+If you run your own copy of SmallStore, connect your own Tchentchen account:
+
+1. In Tchentchen's merchant app, add your site's address as a website. Put the token it shows in
+   `TCHENTCHEN_VERIFY_TOKEN` and your address in `SITE_URL` (`wrangler.jsonc`), deploy, then click
+   **Check now** in Tchentchen. It reads `https://<your site>/.well-known/tchentchen-verification.txt`.
+2. Set a secret that encrypts the keys: `npx wrangler secret put TCHENTCHEN_KEYS_SECRET` (any long
+   random string, for example from `openssl rand -hex 32`).
+3. Sign in with an admin account (`profiles.role = 'admin'`, set in the database), open
+   `/admin/tchentchen` on your site's address and click **Connect Tchentchen**. Tchentchen sends the
+   test and live keys back once; they are stored encrypted.
+4. `TCHENTCHEN_API_BASE` picks the mode: `https://app.tchentchen.com/api/v1/sandbox` for tests (test
+   card 4242 4242 4242 4242) or `https://app.tchentchen.com/api/v1/live`. Instead of steps 2 and 3
+   you can set the key yourself: `npx wrangler secret put TCHENTCHEN_SECRET_KEY`; it wins over the
+   saved keys.
+5. Each merchant turns card payment on in Réglages. Without a key, no card option shows.
 
 ## Meta models used
 
@@ -87,8 +145,12 @@ screen and the store. This list moves up as each part lands.
 | `muse-spark-1.3` | Finds the whole product under the merchant's finger (hold-to-frame) | `src/app/api/locate/route.ts` |
 | `muse-spark-1.3` | Price check with web search from Morocco: lowest, average, highest, suggested price, sources | `src/app/api/price-check/route.ts` |
 | `muse-spark-1.3` | Quality score of each product photo | `src/app/api/photo-score/route.ts` |
+| `muse-spark-1.3` | Sales video import: lists the products from a sheet of 12 frames and what the seller said | `src/app/api/video-products/route.ts`, `src/app/api/extract/route.ts` |
+| `muse-spark-1.3` | Stock camera: which product sits under the counter camera, and how many units | `src/app/api/stockcam/route.ts` |
+| `muse-spark-1.3` | Matches a photographed product to the shared catalog | `src/app/api/catalog-match/route.ts` |
+| `muse-spark-1.3` | Credit said out loud turned into a draft entry (customer, items, amount, due date) | `src/app/api/credit/parse/route.ts` |
+| `muse-spark-1.3` | Ad texts in French, Darija and Arabic, with targeting and a daily budget | `src/app/api/ads/route.ts` |
 | `sam-3.1` | Product segmentation (the mask is decoded and composited on the phone in `src/lib/capture/cutout.ts`) | `src/app/api/segment/route.ts` |
-| `muse-image-1.0` | Studio photo: new background and shadow, the real product pasted back | `src/app/api/studio-photo/route.ts` |
 | `muse-image-1.0` | Three photos of the product from other angles | `src/app/api/better-photos/route.ts` |
 | `muse-image-1.0` | The store's hero photo, on request | `src/app/api/store-hero/route.ts` |
 | `muse-voice-transcribe-1.0` | Transcription of short speech chunks for the captions and both agents | `src/app/api/transcribe/route.ts` |
@@ -151,17 +213,26 @@ Other commands: `npm run preview` (production build in the Workers runtime), `np
 | `MEDIA_LINK_SECRET` | secret | Signs the admin page's links to filming videos, served by `worker.ts` straight from R2. |
 | `SEND_SMS_HOOK_SECRET` | secret | Verifies the phone codes Supabase Auth hands to `/api/auth/sms-hook`. |
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | build env | Supabase project for sign-in in the browser (the key only allows what row level security allows). |
+| `SITE_URL` | `wrangler.jsonc` vars | The site's address. Card payments work only there: it is the website verified in Tchentchen. |
+| `TCHENTCHEN_API_BASE` | `wrangler.jsonc` vars | Tchentchen's API: `https://app.tchentchen.com/api/v1/sandbox` (test) or `https://app.tchentchen.com/api/v1/live`. |
+| `TCHENTCHEN_VERIFY_TOKEN` | `wrangler.jsonc` vars | Tchentchen's website check token, served by `worker.ts` at `/.well-known/tchentchen-verification.txt`. Public by design. |
+| `TCHENTCHEN_SECRET_KEY` | secret | Tchentchen secret key (`tct_test_...` or `tct_live_...`), server only; it also verifies Tchentchen's events. When unset, the key saved by the Connect page is used. No key: no card option. |
+| `TCHENTCHEN_KEYS_SECRET` | secret | Encrypts (AES-GCM) the keys the Connect page saves in the database. |
 
 ## License
 
-All rights reserved. The code is visible for the hackathon evaluation only; see [LICENSE](LICENSE).
+Copyright (c) 2026 Mehdi Bourechka. Tadasouk is open source under the GNU Affero General Public
+License v3.0 ([LICENSE](LICENSE)): you may run, study, change and share it, and anyone who runs a
+changed copy as a public service must offer that copy's source code to its users.
 Third party components keep their own licenses: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Stripe and Tchentchen are separate services and are not covered by this license.
 
 ## Hackathon compliance
 
-- [ ] Public repository (the repository is private for now)
+- [x] Public repository: https://github.com/brkmehdi/tadasouk
+- [x] Open source license: AGPL-3.0 ([LICENSE](LICENSE))
 - [x] New work only: history starts 2026-10-27, no code, files or history imported from other projects
-- [x] Preexisting components labeled (TChenTChen, above)
-- [ ] Demo video opens with the provenance line (the line is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md); the video is not recorded yet)
+- [x] Preexisting components labeled (Stripe and Tchentchen, above; also under the card option and the QR code)
+- [x] Demo video recorded (2 min 57 s): it names the Meta models on screen and labels Tchentchen as built before the hackathon
 - [x] Every model call over the network uses the Meta Model API
 - [x] No secrets committed (`.env*` and `.dev.vars` are ignored; the full history was checked)
