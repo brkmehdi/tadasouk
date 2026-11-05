@@ -1,0 +1,56 @@
+// Copy to wrangler.jsonc and fill in your own values (wrangler.jsonc is not committed).
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "tadasouk",
+	// Your Cloudflare account id (needed when your login has several accounts).
+	"account_id": "<your Cloudflare account id>",
+	// worker.ts streams the filming videos from R2, then hands every other request to Next.js.
+	"main": "worker.ts",
+	"compatibility_date": "2026-10-20",
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"assets": {
+		"directory": ".open-next/assets",
+		"binding": "ASSETS"
+	},
+	"observability": { "enabled": true },
+	// Your own domain, if you have one on Cloudflare:
+	// "routes": [{ "pattern": "example.com", "custom_domain": true }],
+	"workers_dev": true,
+	// Product photos (cutouts and AI photos), written by /api/media, served by /media/...
+	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "<your R2 bucket>" }],
+	// The shared catalog of products, by barcode (src/lib/server/catalog.ts, catalog/README.md).
+	"d1_databases": [
+		{
+			"binding": "CATALOG",
+			"database_name": "<your D1 database name>",
+			"database_id": "<your D1 database id>"
+		}
+	],
+	// Supabase Postgres through Hyperdrive, caching off. In `npm run dev` the same binding points
+	// at the local Supabase stack.
+	"hyperdrive": [
+		{
+			"binding": "HYPERDRIVE",
+			"id": "<your Hyperdrive config id>",
+			"localConnectionString": "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+		}
+	],
+	"vars": {
+		"MODEL_API_BASE": "https://api.meta.ai/v1",
+		"R2_BUCKET_NAME": "<your R2 bucket>",
+		// Your Meta app and its Instagram login configuration (Facebook Login for Business).
+		"META_APP_ID": "<your Meta app id>",
+		"META_LOGIN_CONFIG_ID": "<your login configuration id>",
+		// Hard spending caps in US dollars, checked before every Meta Model API call.
+		"AI_FREE_DAILY_USD": "0",
+		"DAILY_CAP_USD": "10.00",
+		// Your site's address. Card payments only work on it: it is the website verified in Tchentchen.
+		"SITE_URL": "https://example.com",
+		// Tchentchen card payments: sandbox for tests, https://app.tchentchen.com/api/v1/live for real
+		// payments. The keys are secrets (wrangler secret put), never here.
+		"TCHENTCHEN_API_BASE": "https://app.tchentchen.com/api/v1/sandbox",
+		// The website check token Tchentchen gives you; worker.ts serves it at
+		// /.well-known/tchentchen-verification.txt.
+		"TCHENTCHEN_VERIFY_TOKEN": "<your Tchentchen website token>"
+	}
+}

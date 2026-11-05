@@ -286,6 +286,8 @@ Requirements: Node 20.17+ (or 22.9+), a Meta Model API key from [dev.meta.ai](ht
 ```bash
 npm install
 cp .dev.vars.example .dev.vars   # then put your MODEL_API_KEY in it
+cp wrangler.example.jsonc wrangler.jsonc               # then your Cloudflare ids
+cp .env.production.example .env.production            # for production builds: your Supabase project
 npx supabase start               # local Postgres + Auth in Docker, applies supabase/migrations
 npx supabase test db             # row level security and AI credit tests
 npm run dev

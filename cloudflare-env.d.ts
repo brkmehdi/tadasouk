@@ -8,13 +8,13 @@ interface __BaseEnv_CloudflareEnv {
 	ASSETS: Fetcher;
 	MODEL_API_BASE: "https://api.meta.ai/v1";
 	R2_BUCKET_NAME: "smallstore-media";
-	META_APP_ID: "1124556357223880";
-	META_LOGIN_CONFIG_ID: "1149407898017146";
+	META_APP_ID: string;
+	META_LOGIN_CONFIG_ID: string;
 	AI_FREE_DAILY_USD: "0";
 	DAILY_CAP_USD: "10.00";
 	SITE_URL: "https://tadasouk.com";
 	TCHENTCHEN_API_BASE: "https://app.tchentchen.com/api/v1/sandbox";
-	TCHENTCHEN_VERIFY_TOKEN: "tchentchen-site-bd617c014cdb55013acd65b8d4150379d1d6ff69";
+	TCHENTCHEN_VERIFY_TOKEN: string;
 	MODEL_API_KEY: string;
 	MEDIA_LINK_SECRET: string;
 	DATABASE_URL: string;
