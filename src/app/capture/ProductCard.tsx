@@ -28,7 +28,7 @@ export default function ProductCard({ p, current, flash, attaching, onOpen, onRe
     <div
       ref={ref}
       data-card={p.id}
-      className={`card-pop relative shrink-0 rounded-xl bg-white/15 p-1.5 shadow-lg ring-1 backdrop-blur-xl transition-all ${
+      className={`card-pop relative shrink-0 rounded-xl bg-black/45 p-1.5 shadow-lg ring-1 transition-all ${
         attaching ? "ring-2 ring-brand" : current ? "ring-2 ring-white" : "ring-white/20"
       } ${p.status === "removing" ? "card-out" : ""}`}
     >
@@ -113,7 +113,7 @@ export default function ProductCard({ p, current, flash, attaching, onOpen, onRe
         type="button"
         onClick={() => onRemove(p.id)}
         aria-label={`Supprimer ${displayName(p)}`}
-        className="absolute -end-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white ring-1 ring-white/30 backdrop-blur active:scale-90"
+        className="absolute -end-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white ring-1 ring-white/30 active:scale-90"
       >
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
           <path d="M1.5 1.5l7 7m0-7l-7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

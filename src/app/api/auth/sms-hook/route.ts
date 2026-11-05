@@ -1,5 +1,5 @@
 // Supabase Auth hands every phone sign-in code here instead of sending an SMS (Send SMS Hook).
-// We keep the code for 10 minutes. The merchant then writes to the SmallStore WhatsApp number,
+// We keep the code for 10 minutes. The merchant then writes to the Tadasouk WhatsApp number,
 // and the WhatsApp webhook answers with the code: a reply inside the 24-hour window the
 // merchant opened is a free service message, where a code we send first would be paid.
 

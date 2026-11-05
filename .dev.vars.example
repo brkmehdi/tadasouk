@@ -15,3 +15,19 @@ DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
 # Signs the codes Supabase hands to /api/auth/sms-hook ("v1,whsec_..."). Same value as in
 # supabase/.env locally, and as the hook secret in the Supabase dashboard in production.
 SEND_SMS_HOOK_SECRET=
+
+# Secret of the Meta app SmallStore, for the Instagram import: developers.facebook.com > SmallStore >
+# App settings > Basic > App secret. In production: `npx wrangler secret put META_APP_SECRET`.
+META_APP_SECRET=
+
+# Tchentchen card payments (src/lib/server/tchentchen.ts). TCHENTCHEN_API_BASE, SITE_URL and
+# TCHENTCHEN_VERIFY_TOKEN are wrangler.jsonc vars; set them here only to override them locally.
+#
+# Secret key of the Tchentchen account, tct_test_... with the sandbox address, tct_live_... with
+# the live one. It also verifies Tchentchen's signed events. Server only: never in git, never in a
+# log. In production: `npx wrangler secret put TCHENTCHEN_SECRET_KEY`. Empty: the key saved by
+# the Connect page (/admin/tchentchen) is used; no key at all hides the card row.
+TCHENTCHEN_SECRET_KEY=
+# Encrypts the keys the Connect page saves in the database (AES-GCM). Any long random string,
+# e.g. `openssl rand -hex 32`. In production: `npx wrangler secret put TCHENTCHEN_KEYS_SECRET`.
+TCHENTCHEN_KEYS_SECRET=

@@ -6,7 +6,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { readBarcode, warmUpBarcodes } from "@/lib/capture/barcode";
-import { cover, displayName, type Product } from "@/lib/capture/session";
+import { LIVE_VIDEO } from "@/lib/capture/media";
+import { cover, displayName, sameBarcode, type Product } from "@/lib/capture/session";
 import { beep } from "@/lib/capture/sfx";
 import { phoneDigits } from "@/lib/phone";
 import { formatPrice } from "./ProductCard";
@@ -68,9 +69,7 @@ export default function SellMode({
     warmUpBarcodes();
     (async () => {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
-        });
+        stream = await navigator.mediaDevices.getUserMedia({ video: LIVE_VIDEO });
         if (stopped) return stream.getTracks().forEach((t) => t.stop());
         const v = videoRef.current!;
         v.muted = true;
@@ -85,11 +84,11 @@ export default function SellMode({
         if (stopped) return;
         const v = videoRef.current;
         if (v && v.readyState >= 2) {
-          const code = await readBarcode(v);
+          const code = await readBarcode(v, true);
           const now = Date.now();
           if (code && !(code === lastRef.current.code && now - lastRef.current.at < SAME_CODE_MS)) {
             lastRef.current = { code, at: now };
-            const p = productsRef.current.find((x) => x.barcode === code);
+            const p = productsRef.current.find((x) => sameBarcode(x.barcode, code));
             if (p) add(p, "scan");
             else setNotice({ text: `Code ${code} : produit inconnu`, tone: "warn", n: now });
           } else if (code) {
@@ -145,7 +144,7 @@ export default function SellMode({
         <button
           type="button"
           onClick={onExit}
-          className="absolute start-3 top-[max(0.75rem,env(safe-area-inset-top))] rounded-full bg-black/50 px-3 py-1.5 text-sm font-medium text-white backdrop-blur"
+          className="absolute start-3 top-[max(0.75rem,env(safe-area-inset-top))] rounded-full bg-black/50 px-3 py-1.5 text-sm font-medium text-white"
         >
           Retour
         </button>

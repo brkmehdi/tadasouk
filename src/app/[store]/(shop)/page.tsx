@@ -60,7 +60,7 @@ export default async function StoreHome({ params }: Params) {
       <section className="grid items-center gap-10 pt-10 md:grid-cols-2 md:gap-16 md:pt-12">
         <div className="order-2 md:order-1">
           <p className="text-[16px] font-medium text-ink-3">{store.city ? `Boutique à ${store.city}` : "Bienvenue"}</p>
-          <h1 className="mt-2 text-[32px] font-semibold leading-[1.15] tracking-[-0.02em] text-[#1a1a1a] md:text-[40px]">
+          <h1 className="mt-2 text-[34px] font-extrabold leading-[1.08] tracking-[-0.035em] text-[#16151A] md:text-[40px]">
             {store.tagline ?? store.name}
           </h1>
           <p className="mt-4 max-w-[420px] text-[15px] leading-relaxed text-ink-2">
@@ -86,7 +86,7 @@ export default async function StoreHome({ params }: Params) {
           </ul>
         </div>
         {heroImage && (
-          <div className="order-1 aspect-[4/5] overflow-hidden rounded-md bg-[#f2f2f2] md:order-2 md:aspect-[4/5]">
+          <div className="order-1 aspect-[4/5] overflow-hidden rounded-lg bg-[#F3F3F5] md:order-2 md:aspect-[4/5]">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={heroImage}
@@ -100,7 +100,7 @@ export default async function StoreHome({ params }: Params) {
       {top.length > 0 ? (
         <section className="mt-20">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-[16px] font-medium">Meilleures ventes</h2>
+            <h2 className="text-[20px] font-extrabold tracking-[-0.03em]">Meilleures ventes</h2>
             <Link href={`${base}/boutique`} className="shop-mini">
               <UpRightIcon size={10} /> Tout voir
             </Link>
@@ -113,19 +113,19 @@ export default async function StoreHome({ params }: Params) {
 
       {cats.length > 1 && (
         <section className="mt-20">
-          <h2 className="mb-4 text-[16px] font-medium">Acheter par catégorie</h2>
+          <h2 className="mb-4 text-[20px] font-extrabold tracking-[-0.03em]">Acheter par catégorie</h2>
           <ul className="grid grid-cols-2 gap-4 sm:gap-6 md:grid-cols-3">
             {cats.slice(0, 6).map((c) => (
               <li key={c.slug}>
                 <Link href={`${base}/c/${c.slug}`} className="group block">
-                  <span className="block aspect-square overflow-hidden rounded-md bg-[#f2f2f2]">
+                  <span className="block aspect-square overflow-hidden rounded-lg bg-[#F3F3F5]">
                     {c.cover && (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={c.cover} alt="" loading="lazy" className="h-full w-full object-contain p-[8%] mix-blend-multiply transition-transform duration-300 group-hover:scale-[1.03]" />
                     )}
                   </span>
                   <span className="mt-3 flex items-center justify-between">
-                    <span className="text-[14px] font-medium">{c.name}</span>
+                    <span className="text-[14px] font-semibold">{c.name}</span>
                     <NextIcon size={14} className="text-ink-3 transition-transform group-hover:translate-x-0.5" />
                   </span>
                   <span className="text-[12px] text-ink-3">
@@ -138,7 +138,7 @@ export default async function StoreHome({ params }: Params) {
         </section>
       )}
 
-      <section className="mt-20 grid gap-6 border-y border-black/10 py-8 md:grid-cols-3">
+      <section className="mt-20 grid gap-6 border-y border-line py-8 md:grid-cols-3">
         <Pledge icon={<TruckIcon />} title={free != null ? `Livraison offerte dès ${money(free)}` : "Livraison partout au Maroc"}>
           {shipping[0]
             ? `${shipping[0].name}${shipping[0].delay_days != null ? `, en ${shipping[0].delay_days} jour${shipping[0].delay_days > 1 ? "s" : ""}` : ""}.`
@@ -166,7 +166,7 @@ function Pledge({ icon, title, children }: { icon: React.ReactNode; title: strin
     <div className="flex gap-3">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-soft text-ink-2">{icon}</span>
       <div>
-        <p className="text-[14px] font-medium">{title}</p>
+        <p className="text-[14px] font-bold">{title}</p>
         <p className="mt-0.5 text-[13px] text-ink-3">{children}</p>
       </div>
     </div>

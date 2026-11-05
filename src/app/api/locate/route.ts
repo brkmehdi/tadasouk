@@ -5,8 +5,8 @@
 // `found` says whether the middle shows a product at all (not a wall, a floor or a face).
 
 import { NextResponse } from "next/server";
-import { aiContext, errorResponse, responsesJson } from "@/lib/server/meta";
-import { chatCost, PRICES, reserve, settle } from "@/lib/server/usage";
+import { aiContext, errorResponse, isJpegPhoto, responsesJson } from "@/lib/server/meta";
+import { chatCost, PRICES, spend } from "@/lib/server/usage";
 
 type Body = { sessionId: string; image: string; point: { x: number; y: number }; mode?: "tap" | "held" };
 type Located = { found: boolean; noun: string; x_min: number; y_min: number; x_max: number; y_max: number };
@@ -35,14 +35,7 @@ export async function POST(req: Request) {
   const { sessionId, image, point } = body;
   const held = body.mode === "held";
   const inRange = (v: unknown) => typeof v === "number" && v >= 0 && v <= 1000;
-  if (
-    !sessionId ||
-    typeof image !== "string" ||
-    !image.startsWith("data:image/jpeg;base64,") ||
-    image.length > 600_000 ||
-    !inRange(point?.x) ||
-    !inRange(point?.y)
-  ) {
+  if (!sessionId || !isJpegPhoto(image) || !inRange(point?.x) || !inRange(point?.y)) {
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
   }
 
@@ -60,35 +53,38 @@ export async function POST(req: Request) {
   try {
     const ctx = await aiContext();
     const p = PRICES["muse-spark-1.3"];
-    const r = await reserve(ctx, sessionId, "muse-spark-1.3", "/responses locate", 2000 * p.input + 1500 * p.output);
-    try {
-      const { parsed, usage } = await responsesJson<Located>(
-        {
-          model: "muse-spark-1.3",
-          reasoning: { effort: "minimal" },
-          max_output_tokens: 1500,
-          input: [
-            {
-              role: "user",
-              content: [
-                { type: "input_text", text: ask },
-                { type: "input_image", image_url: image },
-              ],
-            },
-          ],
-        },
-        "located_product",
-        SCHEMA,
-      );
-      const entry = await settle(r, chatCost(usage), true, { outputTokens: usage.completion_tokens ?? 0 });
-      if (!parsed || !(parsed.x_max > parsed.x_min && parsed.y_max > parsed.y_min)) {
-        return NextResponse.json({ error: "not_found" }, { status: 404 });
-      }
-      return NextResponse.json({ result: parsed, latencyMs: entry.latencyMs });
-    } catch (err) {
-      await settle(r, 0, false);
-      throw err;
+    const { result, entry } = await spend(
+      ctx,
+      sessionId,
+      "muse-spark-1.3",
+      "/responses locate",
+      2000 * p.input + 1500 * p.output,
+      () =>
+        responsesJson<Located>(
+          {
+            model: "muse-spark-1.3",
+            reasoning: { effort: "minimal" },
+            max_output_tokens: 1500,
+            input: [
+              {
+                role: "user",
+                content: [
+                  { type: "input_text", text: ask },
+                  { type: "input_image", image_url: image },
+                ],
+              },
+            ],
+          },
+          "located_product",
+          SCHEMA,
+        ),
+      ({ usage }) => ({ usd: chatCost(usage), detail: { outputTokens: usage.completion_tokens ?? 0 } }),
+    );
+    const parsed = result.parsed;
+    if (!parsed || !(parsed.x_max > parsed.x_min && parsed.y_max > parsed.y_min)) {
+      return NextResponse.json({ error: "not_found" }, { status: 404 });
     }
+    return NextResponse.json({ result: parsed, latencyMs: entry.latencyMs });
   } catch (err) {
     return errorResponse(err);
   }

@@ -47,7 +47,7 @@ export function Listing({ category }: { category: string | null }) {
   return (
     <div className="pt-10">
       <p className="text-[16px] font-medium text-ink-3">Boutique</p>
-      <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.02em] text-[#1a1a1a]">{cat?.name ?? "Tous les produits"}</h1>
+      <h1 className="mt-1 text-[30px] font-extrabold tracking-[-0.035em] text-[#16151A]">{cat?.name ?? "Tous les produits"}</h1>
       <p className="mt-1 text-[14px] text-ink-3">
         {list.length} produit{list.length > 1 ? "s" : ""}
       </p>

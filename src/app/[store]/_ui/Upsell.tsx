@@ -36,8 +36,8 @@ export function Upsell({ title, items }: { title: string; items: ShopProduct[] }
         <div className="flex transition-transform duration-500 ease-in-out" style={{ transform: `translateX(-${i * 100}%)` }}>
           {items.map((p) => (
             <div key={p.id} className="w-full shrink-0 p-0.5">
-              <div className="flex gap-3 rounded-md p-4 ring-1 ring-black/10">
-                <Link href={`/${store.slug}/${p.id}`} className="h-[42px] w-[42px] shrink-0 overflow-hidden rounded bg-[#f2f2f2]">
+              <div className="flex gap-3 rounded-md p-4 ring-1 ring-line">
+                <Link href={`/${store.slug}/${p.id}`} className="h-[42px] w-[42px] shrink-0 overflow-hidden rounded bg-[#F3F3F5]">
                   {p.cover && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={p.cover} alt="" className="h-full w-full object-contain mix-blend-multiply" />

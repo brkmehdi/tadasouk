@@ -5,8 +5,8 @@
 
 import { buildObjectPrompt } from "@meta-sam/parser";
 import { NextResponse } from "next/server";
-import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
-import { PRICES, reserve, settle } from "@/lib/server/usage";
+import { aiContext, errorResponse, isJpegPhoto, metaFetch } from "@/lib/server/meta";
+import { PRICES, spend } from "@/lib/server/usage";
 
 type Body = {
   sessionId: string;
@@ -30,15 +30,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad_json" }, { status: 400 });
   }
   const { sessionId, image, width, height, box, point, candidates } = body;
-  if (
-    !sessionId ||
-    typeof image !== "string" ||
-    !image.startsWith("data:image/jpeg;base64,") ||
-    image.length > MAX_IMAGE_CHARS ||
-    !(width > 0 && height > 0) ||
-    !box ||
-    (candidates && (!point || candidates.length > 8))
-  ) {
+  if (!sessionId || !isJpegPhoto(image, MAX_IMAGE_CHARS) || !(width > 0 && height > 0) || !box || (candidates && (!point || candidates.length > 8))) {
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
   }
 
@@ -60,34 +52,35 @@ export async function POST(req: Request) {
 
   try {
     const ctx = await aiContext();
-    const r = await reserve(ctx, sessionId, "sam-3.1", "/responses", PRICES["sam-3.1"].image);
-    let upstream: Response;
-    try {
-      upstream = await metaFetch("/responses", {
-        method: "POST",
-        accept: "text/event-stream",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "sam-3.1",
-          input: [
-            {
-              type: "message",
-              role: "user",
-              content: [
-                { type: "input_text", text },
-                { type: "input_image", image_url: image },
-              ],
-            },
-          ],
-          stream: true,
-          metadata: { include_confidence: "true" },
+    const { result: upstream } = await spend(
+      ctx,
+      sessionId,
+      "sam-3.1",
+      "/responses",
+      PRICES["sam-3.1"].image,
+      () =>
+        metaFetch("/responses", {
+          method: "POST",
+          accept: "text/event-stream",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "sam-3.1",
+            input: [
+              {
+                type: "message",
+                role: "user",
+                content: [
+                  { type: "input_text", text },
+                  { type: "input_image", image_url: image },
+                ],
+              },
+            ],
+            stream: true,
+            metadata: { include_confidence: "true" },
+          }),
         }),
-      });
-    } catch (err) {
-      await settle(r, 0, false);
-      throw err;
-    }
-    await settle(r, PRICES["sam-3.1"].image, true, { width, height });
+      () => ({ usd: PRICES["sam-3.1"].image, detail: { width, height } }),
+    );
     return new Response(upstream.body, {
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
     });

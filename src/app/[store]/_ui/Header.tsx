@@ -33,7 +33,7 @@ export function Header() {
 
   return (
     <>
-      <p className="border-b border-black/10 px-4 py-2 text-center text-[12px] text-ink-2">
+      <p className="border-b border-line px-4 py-2 text-center text-[12px] text-ink-2">
         {free != null ? (
           <>
             Livraison offerte dès <b className="font-semibold text-ink">{formatPrice(free, store.currency)}</b>.{" "}
@@ -41,12 +41,12 @@ export function Header() {
         ) : null}
         {store.cod ? "Paiement à la livraison." : "Commande confirmée sur WhatsApp."}
       </p>
-      <header className="sticky top-0 z-40 border-b border-black/10 bg-white/95 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-line bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-[60px] max-w-[952px] items-center gap-6 px-4 md:h-[64px]">
           <button type="button" onClick={() => setMenu(true)} aria-label="Menu" className="-ms-1 p-1 md:hidden">
             <MenuIcon size={20} />
           </button>
-          <Link href={base} className="max-w-[45vw] truncate text-[20px] font-bold tracking-[-0.03em] text-[#1a1a1a] md:max-w-[220px]">
+          <Link href={base} className="max-w-[45vw] truncate text-[21px] font-extrabold tracking-[-0.035em] text-[#16151A] md:max-w-[220px]">
             {store.name}
             <span className="text-brand">.</span>
           </Link>
@@ -76,7 +76,7 @@ export function Header() {
           <div className="ui-scrim" onClick={() => setMenu(false)} />
           <nav className="shop-fade-up absolute inset-x-0 top-0 flex flex-col gap-5 bg-white px-5 pt-5 pb-8 shadow-xl">
             <div className="flex items-center justify-between">
-              <span className="text-[18px] font-bold tracking-[-0.03em]">{store.name}</span>
+              <span className="text-[18px] font-extrabold tracking-[-0.035em]">{store.name}</span>
               <button type="button" onClick={() => setMenu(false)} aria-label="Fermer le menu" className="p-1">
                 <CloseIcon size={18} />
               </button>
@@ -131,12 +131,12 @@ function Search({ onClose }: { onClose: () => void }) {
             </button>
           </div>
           {words.length > 0 && (
-            <ul className="mt-3 max-h-[60dvh] divide-y divide-black/5 overflow-auto border-t border-black/10">
+            <ul className="mt-3 max-h-[60dvh] divide-y divide-black/5 overflow-auto border-t border-line">
               {found.length === 0 && <li className="py-6 text-center text-[14px] text-ink-3">Aucun produit ne correspond.</li>}
               {found.map((p) => (
                 <li key={p.id}>
                   <Link href={`/${store.slug}/${p.id}`} onClick={onClose} className="flex items-center gap-3 py-2.5 hover:bg-soft">
-                    <span className="h-11 w-11 shrink-0 overflow-hidden rounded bg-[#f2f2f2]">
+                    <span className="h-11 w-11 shrink-0 overflow-hidden rounded bg-[#F3F3F5]">
                       {p.cover && (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={p.cover} alt="" className="h-full w-full object-contain mix-blend-multiply" />

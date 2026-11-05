@@ -107,7 +107,8 @@ export class StillnessTrigger {
     this.holding = false;
     if (!target) {
       if (!this.goneSince) this.goneSince = now;
-      if (now - this.goneSince > 700) this.lastFired = null;
+      // Long enough for the detector to miss a few looks at a product that is still there.
+      if (now - this.goneSince > 1500) this.lastFired = null;
       this.anchor = null;
       return false;
     }
@@ -139,6 +140,17 @@ export class StillnessTrigger {
       return true;
     }
     return false;
+  }
+
+  // The picture stopped being steady: the hold starts again.
+  interrupt() {
+    this.anchor = null;
+    this.holding = false;
+  }
+
+  // The phone was moved: what sits in the same place now may be another product.
+  forget() {
+    this.lastFired = null;
   }
 
   markManualCapture(box: Box, now: number) {

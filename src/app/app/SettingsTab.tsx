@@ -25,6 +25,7 @@ export default function SettingsTab({ store, shipping, promos, onSignOut }: {
   const [city, setCity] = useState(store.city ?? "");
   const [whatsapp, setWhatsapp] = useState(store.whatsapp ? displayPhone(store.whatsapp) : "");
   const [cod, setCod] = useState(store.cod_enabled);
+  const [card, setCard] = useState(store.card_enabled);
   const [credit, setCredit] = useState(store.credit_enabled);
   const [tagline, setTagline] = useState(store.tagline ?? "");
   const [state, setState] = useState<"idle" | "busy" | "saved" | "error">("idle");
@@ -40,6 +41,7 @@ export default function SettingsTab({ store, shipping, promos, onSignOut }: {
         whatsapp: phoneDigits(whatsapp) || null,
         tagline: tagline.trim() || null,
         cod_enabled: cod,
+        card_enabled: card,
         credit_enabled: credit,
       })
       .eq("id", store.id);
@@ -80,7 +82,7 @@ export default function SettingsTab({ store, shipping, promos, onSignOut }: {
         <legend className="sr-only">{t("settings.payments")}</legend>
         <p className="text-sm font-medium">{t("settings.payments")}</p>
         <Toggle label={t("settings.cod")} checked={cod} onChange={setCod} />
-        <Toggle label={t("settings.card")} hint={t("settings.cardSoon")} checked={false} disabled onChange={() => {}} />
+        <Toggle label={t("settings.card")} hint={t("settings.cardSoon")} checked={card} onChange={setCard} />
         <Toggle label={t("settings.credit")} checked={credit} onChange={setCredit} />
       </fieldset>
 
@@ -120,6 +122,7 @@ export default function SettingsTab({ store, shipping, promos, onSignOut }: {
       <button type="button" onClick={onSignOut} className="self-start text-sm text-ink-3">
         {t("settings.signOut")}
       </button>
+      <p className="mt-6 text-center text-xs text-ink-3">{t("settings.dataCredit")}</p>
     </form>
   );
 }

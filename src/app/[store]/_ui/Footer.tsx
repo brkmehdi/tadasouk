@@ -9,10 +9,10 @@ export function Footer({ store, products }: { store: ShopStore; products: ShopPr
   const base = `/${store.slug}`;
   const col = "flex flex-col gap-2.5 text-[14px] text-ink-2";
   return (
-    <footer className="mt-24 border-t border-black/10">
+    <footer className="mt-24 border-t border-line">
       <div className="mx-auto grid max-w-[952px] grid-cols-2 gap-8 px-4 py-12 md:grid-cols-4">
         <div className={col}>
-          <p className="mb-1 text-[14px] font-medium text-ink">Boutique</p>
+          <p className="mb-1 text-[14px] font-bold text-ink">Boutique</p>
           <Link href={`${base}/boutique`} className="hover:text-ink">
             Tout voir
           </Link>
@@ -23,7 +23,7 @@ export function Footer({ store, products }: { store: ShopStore; products: ShopPr
           ))}
         </div>
         <div className={col}>
-          <p className="mb-1 text-[14px] font-medium text-ink">Aide</p>
+          <p className="mb-1 text-[14px] font-bold text-ink">Aide</p>
           <Link href={`${base}/panier`} className="hover:text-ink">
             Livraison
           </Link>
@@ -35,19 +35,27 @@ export function Footer({ store, products }: { store: ShopStore; products: ShopPr
           )}
         </div>
         <div className={`${col} col-span-2`}>
-          <p className="mb-1 text-[14px] font-medium text-ink">{store.name}</p>
+          <p className="mb-1 text-[14px] font-bold text-ink">{store.name}</p>
           <span>{store.city ? `Boutique à ${store.city}, Maroc.` : "Boutique au Maroc."}</span>
           <span>Commandez en ligne, le vendeur vous confirme la livraison sur WhatsApp.</span>
         </div>
       </div>
-      <div className="mx-auto flex max-w-[952px] flex-wrap justify-between gap-2 px-4 pb-10 text-[12px] text-ink-3">
+      <div className="mx-auto flex max-w-[952px] flex-wrap items-center justify-between gap-3 px-4 pb-10 text-[12px] text-ink-3">
         <span>
           © {new Date().getFullYear()} {store.name}
           {store.city ? `, ${store.city}` : ""}
         </span>
-        <Link href="/" className="hover:text-ink-2">
-          Boutique créée avec SmallStore
-        </Link>
+        <a href="https://tadasouk.com" className="group inline-flex items-center gap-2 text-ink-3 hover:text-ink-2">
+          Boutique créée avec
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/tadasouk-horizontal-color.svg"
+            alt="Tadasouk"
+            width={71}
+            height={22}
+            className="h-[22px] w-auto opacity-90 transition-opacity group-hover:opacity-100"
+          />
+        </a>
       </div>
     </footer>
   );

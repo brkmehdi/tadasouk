@@ -6,7 +6,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/server/db";
 import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
-import { PRICES, reserve, settle } from "@/lib/server/usage";
+import { PRICES, spend } from "@/lib/server/usage";
 
 export async function POST() {
   try {
@@ -28,24 +28,26 @@ export async function POST() {
       `inviting and clean. No text, no letters, no logos, no people's faces.`;
 
     const cost = PRICES["muse-image-1.0"].image;
-    const r = await reserve(ctx, "store-hero", "muse-image-1.0", "/images/generations hero", cost);
-    let bytes: Uint8Array;
-    try {
-      const res = await metaFetch("/images/generations", {
-        method: "POST",
-        accept: "application/json",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: "muse-image-1.0", prompt, n: 1, size: "1792x1024", output_format: "jpeg" }),
-      });
-      const data = (await res.json()) as { data?: { b64_json?: string }[] };
-      const b64 = data.data?.[0]?.b64_json;
-      if (!b64) throw new Error("no image in the answer");
-      bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    } catch (err) {
-      await settle(r, 0, false);
-      throw err;
-    }
-    await settle(r, cost, true, { images: 1 });
+    const { result: bytes } = await spend(
+      ctx,
+      "store-hero",
+      "muse-image-1.0",
+      "/images/generations hero",
+      cost,
+      async () => {
+        const res = await metaFetch("/images/generations", {
+          method: "POST",
+          accept: "application/json",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "muse-image-1.0", prompt, n: 1, size: "1792x1024", output_format: "jpeg" }),
+        });
+        const data = (await res.json()) as { data?: { b64_json?: string }[] };
+        const b64 = data.data?.[0]?.b64_json;
+        if (!b64) throw new Error("no image in the answer");
+        return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      },
+      () => ({ usd: cost, detail: { images: 1 } }),
+    );
 
     const key = `stores/${shop.id}/hero/${crypto.randomUUID()}.jpg`;
     await getCloudflareContext().env.MEDIA.put(key, bytes, {

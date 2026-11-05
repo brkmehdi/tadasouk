@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { adminUser, listCaptures } from "@/lib/server/admin";
 import Videos from "./Videos";
 
-export const metadata: Metadata = { title: "Vidéos · Admin · SmallStore", robots: { index: false } };
+export const metadata: Metadata = { title: "Vidéos · Admin · Tadasouk", robots: { index: false } };
 
 export default async function VideosPage() {
   if (!(await adminUser())) notFound();

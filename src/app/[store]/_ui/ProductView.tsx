@@ -123,7 +123,7 @@ export function ProductView({ product: p, photos, shareUrl }: { product: ShopPro
           <BackIcon size={12} className="-ms-5 text-ink-3 transition-transform group-hover:-translate-x-0.5" />
           {p.category ?? "Tous les produits"}
         </Link>
-        <div className="relative aspect-square overflow-hidden rounded-md bg-[#f2f2f2]">
+        <div className="relative aspect-square overflow-hidden rounded-lg bg-[#F3F3F5]">
           {current && (
             // eslint-disable-next-line @next/next/no-img-element
             <img key={current.url} src={current.url} alt={`${p.name}${chosen ? `, ${chosen.name}` : ""}`} className="shop-fade-up h-full w-full object-contain p-[4%] mix-blend-multiply" />
@@ -142,7 +142,7 @@ export function ProductView({ product: p, photos, shareUrl }: { product: ShopPro
                 type="button"
                 onClick={() => setSlide(i)}
                 aria-label={`Photo ${i + 1} sur ${shown.length}`}
-                className={`h-14 w-14 shrink-0 overflow-hidden rounded bg-[#f2f2f2] ${i === Math.min(slide, shown.length - 1) ? "ring-2 ring-ink" : ""}`}
+                className={`h-14 w-14 shrink-0 overflow-hidden rounded bg-[#F3F3F5] ${i === Math.min(slide, shown.length - 1) ? "ring-2 ring-ink" : ""}`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={f.url} alt="" className="h-full w-full object-contain mix-blend-multiply" />
@@ -157,10 +157,10 @@ export function ProductView({ product: p, photos, shareUrl }: { product: ShopPro
 
       <div className="min-w-0">
         {p.draft && <p className="mb-3 inline-block rounded bg-ink px-2 py-0.5 text-xs font-medium text-white">Brouillon : visible par vous seulement</p>}
-        <h1 className="text-[20px] font-medium tracking-[-0.01em] text-[#1a1a1a]">{p.name}</h1>
+        <h1 className="text-[22px] font-bold leading-tight tracking-[-0.025em] text-[#16151A]">{p.name}</h1>
         {p.category && <p className="mt-0.5 text-[14px] text-ink-3">{p.category}</p>}
         <div className="mt-4 flex items-center gap-3">
-          <span className="text-[34px] font-semibold tabular-nums tracking-[-0.03em] text-[#1a1a1a]">{p.price != null ? money(p.price) : "Sur demande"}</span>
+          <span className="text-[34px] font-semibold tabular-nums tracking-[-0.03em] text-[#16151A]">{p.price != null ? money(p.price) : "Sur demande"}</span>
           {p.compareAt != null && <s className="text-[16px] text-ink-3 tabular-nums">{money(p.compareAt)}</s>}
           {off > 0 && <span className="rounded bg-[#d7f5e6] px-1.5 py-0.5 text-[12px] font-medium text-[#0a7d4e]">-{off} %</span>}
           {canBuy && (
@@ -290,7 +290,7 @@ export function ProductView({ product: p, photos, shareUrl }: { product: ShopPro
       {canBuy && (
         <div
           aria-hidden={!barShown}
-          className={`fixed inset-x-0 bottom-0 z-30 flex items-center gap-3 border-t border-black/10 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-transform duration-300 md:hidden ${
+          className={`fixed inset-x-0 bottom-0 z-30 flex items-center gap-3 border-t border-line bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] transition-transform duration-300 md:hidden ${
             barShown ? "translate-y-0" : "translate-y-full"
           }`}
         >

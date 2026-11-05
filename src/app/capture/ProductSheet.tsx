@@ -246,6 +246,7 @@ export default function ProductSheet(props: Props) {
           </button>
         </div>
         {p.photos === "error" && <p className="mt-2 text-[13px] text-danger">Les photos n’ont pas pu être créées.</p>}
+        {p.photos === "refused" && <p className="mt-2 text-[13px] text-ink-2">L’IA ne crée pas de photo pour ce type de produit. Rien n’a été facturé, vos photos restent.</p>}
 
         <button
           type="button"

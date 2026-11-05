@@ -7,11 +7,11 @@
 
 import { useMemo, useRef, useState } from "react";
 import { catalogGrid, countCells, MAX_CELLS, shelfJpeg, type CountCell, type CountItem } from "@/lib/catalog/count";
-import { coverOf, type CatalogProduct } from "@/lib/catalog/types";
+import { colorsOf, coverOf, type CatalogProduct } from "@/lib/catalog/types";
 import { useT } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase/browser";
 
-type Shot = { url: string; ratio: number; items: (CountItem & { off: boolean })[] };
+type Shot = { url: string; ratio: number; cells: CountCell[]; items: (CountItem & { off: boolean })[] };
 type Phase = "start" | "working" | "result" | "saved";
 
 const DOTS = ["#e5484d", "#30a46c", "#3e63dd", "#f76b15", "#8e4ec6", "#12a594", "#d6409f", "#978365", "#0090ff", "#e54666"];
@@ -49,6 +49,7 @@ export default function CountMode({
 
   // Products seen on the photos, in the order they were first seen (their number and dot colour
   // stay put); colours listed under each. A product whose dots were all removed is not counted.
+  // `missed`: its colours no photo looked for, so the number shown may be short of the real stock.
   const seen = useMemo(() => {
     const order = new Map<string, number>(); // id -> dots still on
     const colors = new Map<string, Map<string, number>>();
@@ -71,7 +72,8 @@ export default function CountMode({
         const c = p.product_colors.find((x) => x.id === cid);
         return { id: cid, name: c?.name ?? "?", hex: c?.hex ?? "#8b8d98", k };
       });
-      return [{ p, count, byColor, color: DOTS[i % DOTS.length], no: i + 1, counted: dots > 0 || (fix[id] ?? 0) > 0 }];
+      const missed = colorsOf(p).filter((c) => !shots.some((s) => s.cells.some((x) => x.productId === id && x.colorId === c.id)));
+      return [{ p, dots, count, byColor, missed, color: DOTS[i % DOTS.length], no: i + 1, counted: dots > 0 || (fix[id] ?? 0) > 0 }];
     });
   }, [shots, fix, byId]);
   const rows = seen.filter((r) => r.counted);
@@ -99,7 +101,7 @@ export default function CountMode({
       });
       const data = (await res.json().catch(() => ({}))) as { items?: CountItem[]; message?: string };
       if (!res.ok || !data.items) throw new Error(data.message ?? t("common.error"));
-      setShots((s) => [...s, { url: shelf.url, ratio: shelf.height / shelf.width, items: data.items!.map((it) => ({ ...it, off: false })) }]);
+      setShots((s) => [...s, { url: shelf.url, ratio: shelf.height / shelf.width, cells, items: data.items!.map((it) => ({ ...it, off: false })) }]);
       setPhase("result");
     } catch (e) {
       setError(e instanceof Error && e.message ? e.message : t("common.error"));
@@ -110,8 +112,13 @@ export default function CountMode({
     }
   };
 
-  const toggle = (shot: number, item: number) =>
-    setShots((s) => s.map((x, i) => (i !== shot ? x : { ...x, items: x.items.map((it, j) => (j === item ? { ...it, off: !it.off } : it)) })));
+  // The − corrections can never exceed the dots left, or + would look dead and a dot put back would not count.
+  const toggle = (shot: number, item: number) => {
+    const it = shots[shot].items[item];
+    const dots = (rowOf(it.productId)?.dots ?? 0) + (it.off ? 1 : -1);
+    setShots((s) => s.map((x, i) => (i !== shot ? x : { ...x, items: x.items.map((y, j) => (j === item ? { ...y, off: !y.off } : y)) })));
+    setFix((f) => ({ ...f, [it.productId]: Math.max(f[it.productId] ?? 0, -dots) }));
+  };
 
   // Each stock is set to its count, so saving again after a failure is safe.
   const save = async () => {
@@ -139,6 +146,17 @@ export default function CountMode({
     void analyse(e.target.files?.[0]);
     e.target.value = ""; // the same photo picked again still counts
   };
+  const categoryChips = [null, ...categories].map((c) => (
+    <button
+      key={c ?? "all"}
+      type="button"
+      onClick={() => setCategory(c)}
+      aria-pressed={category === c}
+      className={`shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium ${category === c ? "bg-ink text-white" : "bg-soft text-ink-2"}`}
+    >
+      {c ?? t("count.all")}
+    </button>
+  ));
   const pickers = (
     <>
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" hidden onChange={pick} />
@@ -169,19 +187,7 @@ export default function CountMode({
                 {choose && (
                   <>
                     <p className="ui-label mt-5">{t("count.which")}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {[null, ...categories].map((c) => (
-                        <button
-                          key={c ?? "all"}
-                          type="button"
-                          onClick={() => setCategory(c)}
-                          aria-pressed={category === c}
-                          className={`rounded-full px-3 py-1.5 text-[13px] font-medium ${category === c ? "bg-ink text-white" : "bg-soft text-ink-2"}`}
-                        >
-                          {c ?? t("count.all")}
-                        </button>
-                      ))}
-                    </div>
+                    <div className="flex flex-wrap gap-2">{categoryChips}</div>
                   </>
                 )}
                 {chosen.length > MAX_CELLS && <p className="mt-3 text-xs text-ink-3">{t("count.firstOnly")}</p>}
@@ -286,6 +292,11 @@ export default function CountMode({
                           <span className="block text-xs text-ink-3 tabular-nums">
                             {t("count.stockNow")} {r.p.stock ?? "—"}
                           </span>
+                          {phase === "result" && r.missed.length > 0 && (
+                            <span className="mt-0.5 block text-xs font-medium text-danger" data-testid="count-missed">
+                              {t("count.missed")} {r.missed.map((c) => c.name).join(", ")}. {t("count.missedHint")}
+                            </span>
+                          )}
                         </span>
                         {phase === "result" ? (
                           <span className="flex items-center gap-1">
@@ -335,6 +346,12 @@ export default function CountMode({
             >
               {t("count.save")}
             </button>
+            {choose && (
+              <>
+                <p className="mt-3 text-xs text-ink-3">{t("count.whichNext")}</p>
+                <div className="no-scrollbar mt-1.5 flex gap-2 overflow-x-auto pb-0.5">{categoryChips}</div>
+              </>
+            )}
             <div className="mt-2 grid grid-cols-2 gap-2">
               <button type="button" onClick={() => cameraRef.current?.click()} className="ui-btn ui-btn-secondary h-10 text-[13px]">
                 {t("count.another")}

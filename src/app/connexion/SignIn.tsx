@@ -2,7 +2,7 @@
 
 // Sign up and sign in. "Continuer avec Google", or one field that takes an email or a phone
 // number: an email asks for a password, a phone number gets a code on WhatsApp (the merchant
-// writes to SmallStore first, so our answer with the code is free).
+// writes to Tadasouk first, so our answer with the code is free).
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -116,7 +116,10 @@ export default function SignIn({ linkError }: { linkError: boolean }) {
   return (
     <main className="flex min-h-dvh flex-col items-center bg-white px-6 pt-[18vh] text-ink">
       <div className="w-full max-w-sm">
-        <h1 className="text-[22px] font-semibold tracking-[-0.01em]">SmallStore</h1>
+        <h1>
+          {/* eslint-disable-next-line @next/next/no-img-element -- a static SVG logo, no resizing needed */}
+          <img src="/brand/tadasouk-horizontal-color.svg" alt="Tadasouk" width={129} height={40} className="h-10 w-auto" />
+        </h1>
         <p className="mt-1 text-sm text-ink-3">
           {step === "login" ? "Content de vous revoir." : "Filmez vos produits, votre boutique se construit toute seule."}
         </p>
@@ -188,19 +191,19 @@ export default function SignIn({ linkError }: { linkError: boolean }) {
           <form className="mt-8 flex flex-col gap-4" onSubmit={verify}>
             <ol className="flex flex-col gap-4 text-sm">
               <li>
-                <p className="font-medium">1. Écrivez à SmallStore sur WhatsApp</p>
+                <p className="font-medium">1. Écrivez à Tadasouk sur WhatsApp</p>
                 <p className="mt-1 text-ink-3">Depuis le {displayPhone(digits)}. Nous vous répondons avec votre code.</p>
                 {WHATSAPP ? (
                   <a
                     className="ui-btn ui-btn-secondary mt-2 h-11 w-full"
-                    href={`https://wa.me/${WHATSAPP}?text=${encodeURIComponent("Mon code SmallStore")}`}
+                    href={`https://wa.me/${WHATSAPP}?text=${encodeURIComponent("Mon code Tadasouk")}`}
                     target="_blank"
                     rel="noopener"
                   >
                     Ouvrir WhatsApp
                   </a>
                 ) : (
-                  <p className="mt-2 text-ink-3">Le numéro WhatsApp de SmallStore n&apos;est pas encore branché.</p>
+                  <p className="mt-2 text-ink-3">Le numéro WhatsApp de Tadasouk n&apos;est pas encore branché.</p>
                 )}
               </li>
               <li>

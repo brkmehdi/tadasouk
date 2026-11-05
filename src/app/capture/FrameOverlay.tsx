@@ -262,7 +262,7 @@ export default function FrameOverlay({ ref, onCapture, locate, onFramingChange, 
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => setFrame(null)}
             aria-label="Annuler le cadrage"
-            className="absolute -top-11 left-0 flex h-8 items-center rounded-full bg-black/55 px-3 text-xs font-medium text-white backdrop-blur"
+            className="absolute -top-11 left-0 flex h-8 items-center rounded-full bg-black/55 px-3 text-xs font-medium text-white"
           >
             Annuler
           </button>

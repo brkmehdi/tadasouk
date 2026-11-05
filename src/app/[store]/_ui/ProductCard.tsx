@@ -10,7 +10,7 @@ export function ProductCard({ p, slug, currency, badge }: { p: ShopProduct; slug
   const label = p.draft ? "Brouillon" : off ? `-${off} %` : badge;
   return (
     <Link href={`/${slug}/${p.id}`} className="group block">
-      <span className="relative block aspect-square overflow-hidden rounded-md bg-[#f2f2f2]">
+      <span className="relative block aspect-square overflow-hidden rounded-lg bg-[#F3F3F5]">
         {p.cover && (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -34,8 +34,8 @@ export function ProductCard({ p, slug, currency, badge }: { p: ShopProduct; slug
         )}
       </span>
       <span className="mt-2.5 flex items-start justify-between gap-2">
-        <span className="min-w-0 text-[14px] font-medium leading-[18px]">{p.name}</span>
-        <span className="shrink-0 text-[14px] font-medium tabular-nums tracking-[-0.02em]">
+        <span className="min-w-0 text-[14px] font-semibold leading-[18px]">{p.name}</span>
+        <span className="shrink-0 text-[14px] font-bold tabular-nums tracking-[-0.02em]">
           {p.compareAt != null && <s className="me-1.5 font-normal text-ink-3">{formatPrice(p.compareAt, currency)}</s>}
           {p.price != null ? formatPrice(p.price, currency) : "Sur demande"}
         </span>

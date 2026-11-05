@@ -1,0 +1,15 @@
+/* Tadasouk brand tokens */
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+
+:root {
+  --tadasouk-blue: #0074D4;
+  --tadasouk-ink: #16151A;
+  --tadasouk-white: #FFFFFF;
+  --tadasouk-surface: #F3F3F5;
+  --tadasouk-border: #E8E8EC;
+
+  --tadasouk-font: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --tadasouk-weight-body: 500;
+  --tadasouk-weight-heading: 800;
+  --tadasouk-tracking-display: -0.035em;
+}

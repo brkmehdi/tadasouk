@@ -48,9 +48,10 @@ next-env.d.ts
 .dev.vars.*
 !.dev.vars.example
 
-# private brief, not published
+# local notes and local tooling, not published
 Requirement.txt
-
-# proof skill: screenshots and videos, and the local test sign-in
 proofs/
-.claude/toolkit.local.json
+.claude/
+docs/DEMO_SCRIPT.md
+public/brand/KIT-README.md
+public/brand/README.md

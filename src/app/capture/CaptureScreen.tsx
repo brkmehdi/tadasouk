@@ -3,14 +3,15 @@
 import type { ObjectDetector } from "@mediapipe/tasks-vision";
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, useSyncExternalStore } from "react";
 import { createCatalogSync } from "@/lib/catalog/sync";
-import { ghostCrop, grabKeyframe, locateProduct, segment, SegmentError, type Keyframe } from "@/lib/capture/cutout";
+import { grabKeyframe, locateProduct, segment, type Keyframe } from "@/lib/capture/cutout";
 import { coversCenter, createDetector, pickTarget, StillnessTrigger, type Box, type Target } from "@/lib/capture/detector";
 import { SceneTrigger } from "@/lib/capture/scene";
 import { emptyMetrics, report, type Metrics } from "@/lib/capture/metrics";
-import { innerRegion, signature, similarity, type Signature } from "@/lib/capture/similarity";
-import { betterPhotos, checkPrice, identify, scorePhoto, studioPhoto, webPhotos } from "@/lib/capture/product-actions";
+import { innerRegion, SAME_CROP, SAME_SHOT, signature, similarity, type Signature } from "@/lib/capture/similarity";
+import { betterPhotos, catalogProduct, checkPrice, identify, matchCatalog, PhotoRefused, scorePhotos, webPhotos } from "@/lib/capture/product-actions";
 import { beep, shutter } from "@/lib/capture/sfx";
-import { readBarcode, warmUpBarcodes } from "@/lib/capture/barcode";
+import { readBarcode, readShot, warmUpBarcodes } from "@/lib/capture/barcode";
+import { clearlySharper, photoOf, previewOf } from "@/lib/capture/shots";
 import {
   addCaptured,
   addImage,
@@ -27,14 +28,16 @@ import {
   purgeRemoved,
   removeProduct,
   aiPatch,
+  rankImages,
+  researchPatch,
+  sameBarcode,
   type Effect,
   type Product,
-  type ProductImage,
   type Question,
   type SessionState,
   type ToolCall,
 } from "@/lib/capture/session";
-import { explainMediaError, openCamera, type MediaHelp } from "@/lib/capture/media";
+import { explainMediaError, LIVE_VIDEO, openCamera, openMicrophone, openStills, watchPressure, type MediaHelp, type Stills } from "@/lib/capture/media";
 import { startVoice } from "@/lib/capture/voice";
 import ProductCard from "./ProductCard";
 import ProductTray from "./ProductTray";
@@ -47,15 +50,26 @@ import FrameOverlay, { type Frame, type FrameApi } from "./FrameOverlay";
 type Phase = "idle" | "starting" | "recording" | "stopped";
 type Caption = { id: number; text: string; kind: "heard" | "pending" | "question" | "error" };
 
-const CUE = /\b(this one|that one|hada|hadi|hadou|celui[- ]ci|celle[- ]ci|ceci)\b|هادا|هادي|هذا|هذه/i;
-const DETECT_EVERY_MS = 66;
-// Similarity above which a capture counts as a product already in the tray (see similarity.ts).
-const SAME_CROP = 0.74;
-const SAME_CUTOUT = 0.76;
-const SCAN_EVERY_MS = 700; // barcode look-ups on the live video while filming
+// The phone heats up when the processor never rests, so the live work runs in short bursts.
+const PAINT_EVERY_MS = 33; // the outline and the rings redraw at most this often
+const LOOK_EVERY_MS = 100; // the auto-capture triggers look at the picture this often
+const DETECT_MIN_GAP_MS = 300; // a multiple of LOOK_EVERY_MS: the detector only runs on a look
+const DETECT_MAX_GAP_MS = 3000;
+const DETECT_REST = 10; // the detector rests this many times longer than it ran, so a slow phone runs it less
+const IDLE_PAUSE_MS = 60_000; // no product, no word, no touch for this long: the camera pauses
+const MAX_SCORED = 8; // photos in one scoring request, the real one included
+const MAX_SHOTS = 5;
+const LISTEN_MS = 12_000; // after "+", or after the last word: then the microphone closes
+const BARCODE_HINT_MS = 2500;
+const CLEAN_SCORE = 60; // an image this good, of the exact product, needs no background removal
+const CLEAN_FIDELITY = 7;
+const SCAN_EVERY_MS = 1000; // barcode look-ups on the live video while filming
 const STORE_NAME = "Ma boutique"; // until the store settings exist (Phase 1)
 
-export type CaptureApi = { start: () => void };
+// From a video: its best frame, other views of the same moment, and whether the merchant corrected the name.
+// `contents`: for a pack from a video, the list of what it holds, saved as its description.
+export type ImportedProduct = { frame: Keyframe; views: Keyframe[]; name: string; named: boolean; price: number | null; contents: string | null };
+export type CaptureApi = { start: () => void; importProducts: (items: ImportedProduct[]) => void };
 
 // Standalone at /capture, or inside the back office (/app): there the red button of the menu
 // calls start() in its own tap (iOS needs the tap for the camera and the sound), every product
@@ -77,19 +91,30 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
   // the versions already handed to the sync.
   const syncRef = useRef<ReturnType<typeof createCatalogSync> | null>(null);
   const savedRef = useRef(new Map<string, Product>());
-  const recorderRef = useRef<MediaRecorder | null>(null);
   const voiceRef = useRef<{ stop: () => Promise<void> } | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
   const sessionIdRef = useRef("");
   const startedAtRef = useRef(0);
   const metricsRef = useRef<Metrics>(emptyMetrics());
-  const lastCaptureAtRef = useRef(-Infinity);
-  const speechSnapRef = useRef<Keyframe | null>(null);
+  const listenRunRef = useRef(0); // each opening of the microphone, so a late one closes itself
   const queueRef = useRef<Promise<void>>(Promise.resolve());
   const sessionRef = useRef<SessionState>(initialSession());
   const captionIdRef = useRef(0);
   const loopRef = useRef(0);
-  const lastDetectRef = useRef(0);
+  const lastLookRef = useRef(0);
+  const nextDetectRef = useRef(0);
+  const paintRef = useRef(""); // what the overlay shows now, so an unchanged picture is not redrawn
+  const stillsRef = useRef<Stills | null>(null);
+  const activityRef = useRef(0); // last product, word or touch
+  const pausedRef = useRef(false);
+  const shotsRef = useRef(new Map<string, { k: Keyframe; sig: Signature; productId: string }>());
+  const jobsRef = useRef(new Map<string, Promise<unknown>[]>()); // each product's unfinished shots
+  const finishRef = useRef<(id: string) => Promise<void>>(async () => {});
+  const stopListeningRef = useRef<() => Promise<void>>(async () => {});
+  const resumingRef = useRef(false);
+  const hotRef = useRef(false); // the browser says the phone is under pressure
+  const pressureRef = useRef<{ disconnect: () => void } | null>(null);
+  const pauseRef = useRef(0);
   const attachIdRef = useRef<string | null>(null);
   const sigsRef = useRef(new Map<string, { crops: Signature[]; cutouts: Signature[] }>());
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -107,10 +132,11 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
   const [session, setSessionState] = useState<SessionState>(initialSession);
   const [captions, setCaptions] = useState<Caption[]>([]);
   const [detectorState, setDetectorState] = useState<"off" | "loading" | "ready" | "failed">("off");
-  const [level, setLevel] = useState({ rms: 0, speaking: false });
+  const [speaking, setSpeaking] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [metricsView, setMetricsView] = useState(report(emptyMetrics()));
   const [showMetrics, setShowMetrics] = useState(false);
-  const [upload, setUpload] = useState<string | null>(null);
   const [attachId, setAttachIdState] = useState<string | null>(null);
   const [open, setOpen] = useState<{ id: string; from: DOMRect } | null>(null);
   const [flash, setFlash] = useState<{ id: string; n: number } | null>(null);
@@ -118,7 +144,6 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
   const [shots, setShots] = useState<Shot[]>([]);
   const [shutterN, setShutterN] = useState(0);
   const [dismissed, setDismissed] = useState<string[]>([]);
-  const [armed, setArmedState] = useState(true);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [framing, setFraming] = useState(false);
   const [mode, setMode] = useState<"capture" | "sell">("capture");
@@ -155,7 +180,6 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
 
   const setArmed = useCallback((v: boolean) => {
     armedRef.current = v;
-    setArmedState(v);
   }, []);
 
   const refreshMetrics = useCallback(() => setMetricsView(report(metricsRef.current)), []);
@@ -166,12 +190,37 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     setAttachIdState(id);
   }, []);
 
+  // ---------- best photo first ----------
+  // Scores the photos that have no score yet against the merchant's real photo, then ranks them all.
+  const rankPhotos = useCallback(
+    async (id: string) => {
+      const p = sessionRef.current.products.find((x) => x.id === id);
+      if (!p) return;
+      const real = p.images.find((i) => i.source === "camera" && !i.pending);
+      const waiting = p.images.filter((i) => !i.pending && i.quality === undefined);
+      const fresh = (real ? waiting.filter((i) => i !== real) : waiting).slice(0, real ? MAX_SCORED - 1 : MAX_SCORED);
+      if (real && real.quality === undefined) fresh.unshift(real);
+      if (!fresh.length) return;
+      const photos = real && !fresh.includes(real) ? [real, ...fresh] : fresh;
+      let next = sessionRef.current;
+      for (const image of fresh) next = patchImage(next, id, image.id, { quality: "loading" });
+      setSession(next);
+      const scores = await scorePhotos(sessionIdRef.current || crypto.randomUUID(), photos, p.name).catch(() => []);
+      next = sessionRef.current;
+      photos.forEach((image, i) => {
+        if (fresh.includes(image)) next = patchImage(next, id, image.id, { quality: scores[i] ?? "error" });
+      });
+      setSession(rankImages(next, id));
+    },
+    [setSession],
+  );
+
   // ---------- slow product actions: AI photos, price check ----------
   const runEffect = useCallback(
     (effect: Effect): Promise<void> | void => {
       const sid = sessionIdRef.current || crypto.randomUUID();
       if (effect.kind === "next_product") {
-        setArmed(true);
+        void finishRef.current(sessionRef.current.products.find((p) => p.collecting)?.id ?? "");
         return;
       }
       const product = sessionRef.current.products.find((p) => p.id === effect.productId);
@@ -184,9 +233,13 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
             addImage(sessionRef.current, product.id, { id: crypto.randomUUID(), url, source: "ai", pending: false, credit: angle }),
           ),
         )
-          .then(() => setSession(patchProduct(sessionRef.current, product.id, { photos: "idle" })))
+          .then(() => {
+            setSession(patchProduct(sessionRef.current, product.id, { photos: "idle" }));
+            const now = sessionRef.current.products.find((p) => p.id === product.id);
+            if (now?.research === "done") return rankPhotos(product.id); // asked for later
+          })
           .catch((err: unknown) => {
-            setSession(patchProduct(sessionRef.current, product.id, { photos: "error" }));
+            setSession(patchProduct(sessionRef.current, product.id, { photos: err instanceof PhotoRefused ? "refused" : "error" }));
             caption(err instanceof Error ? err.message : String(err), "error");
           });
       } else {
@@ -195,19 +248,15 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
         return checkPrice(sid, product).then((check) => {
           const now = sessionRef.current.products.find((p) => p.id === product.id);
           if (!now) return;
-          const patch: Partial<typeof now> = { priceCheck: check };
-          // The web search knows the exact product better than the photo alone.
-          if (check.status === "done" && check.name_fr) {
-            Object.assign(patch, aiPatch(now, { name: check.name_fr, description: check.description_fr }));
-            if (check.name_ar) patch.nameAr = check.name_ar;
-            if (check.category) patch.category = check.category;
-          }
-          setSession(patchProduct(sessionRef.current, product.id, patch));
+          setSession(patchProduct(sessionRef.current, product.id, researchPatch(now, check)));
           if (check.status === "error") caption(check.message, "error");
+        }).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : "Vérification impossible";
+          setSession(patchProduct(sessionRef.current, product.id, { priceCheck: { status: "error", message } }));
         });
       }
     },
-    [caption, setArmed, setSession],
+    [caption, rankPhotos, setSession],
   );
 
 
@@ -215,7 +264,7 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
   // Right after the cutout: name the product from its photo (only fills what the merchant
   // has not set).
   const runIdentify = useCallback(
-    (id: string) => {
+    (id: string, describeOnly = false) => {
       const product = sessionRef.current.products.find((p) => p.id === id);
       if (!product || product.identify !== "idle") return;
       setSession(patchProduct(sessionRef.current, id, { identify: "loading" }));
@@ -226,7 +275,7 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
           const patch: Partial<typeof now> = { identify: who ? "done" : "failed" };
           if (who) {
             // A first guess from the photo, written into the fields; the web research refines it.
-            Object.assign(patch, aiPatch(now, { name: who.name_fr, description: who.confident ? who.description_fr : null }));
+            Object.assign(patch, aiPatch(now, { name: describeOnly ? null : who.name_fr, description: who.confident ? who.description_fr : null }));
             patch.nameAr = now.nameAr ?? (who.name_ar || null);
             patch.category = now.category ?? (who.category || null);
           }
@@ -239,33 +288,26 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     [setSession],
   );
 
-  const runStudio = useCallback(
-    (productId: string, image: ProductImage) => {
-      if (!image.cutoutUrl) return Promise.resolve();
-      return studioPhoto(sessionIdRef.current, image.cutoutUrl)
-        .then(({ url }) =>
-          setSession(addImage(sessionRef.current, productId, { id: crypto.randomUUID(), url, source: "studio", pending: false })),
-        )
-        .catch(() => {
-          // The plain white photo stays; nothing to tell the merchant.
-        });
+  // Without a clean image of the exact product, the best real shot gets its background removed.
+  const cleanPhoto = useCallback(
+    async (id: string) => {
+      const p = sessionRef.current.products.find((x) => x.id === id);
+      if (!p) return;
+      const clean = p.images.some(
+        (i) => i.source !== "camera" && typeof i.quality === "object" && i.quality.score >= CLEAN_SCORE && (i.verified || (i.quality.fidelity ?? 10) >= CLEAN_FIDELITY),
+      );
+      const best = p.images.find((i) => i.source === "camera" && shotsRef.current.has(i.id));
+      if (clean || !best) return;
+      const { k } = shotsRef.current.get(best.id)!;
+      const cut = await segment(sessionIdRef.current, k).catch(() => null);
+      if (!cut) return;
+      const next = addImage(sessionRef.current, id, { id: crypto.randomUUID(), url: cut.url, source: "camera", pending: false, credit: "Détourée" });
+      setSession(patchProduct(next, id, { color: p.color ?? cut.color }));
+      await rankPhotos(id);
     },
-    [setSession],
+    [rankPhotos, setSession],
   );
 
-  // Quality score of one photo, asked when the merchant opens it in the preview.
-  const scoreImage = useCallback(
-    (imageId: string) => {
-      const p = sessionRef.current.products.find((x) => x.images.some((i) => i.id === imageId));
-      const image = p?.images.find((i) => i.id === imageId);
-      if (!p || !image || image.quality !== undefined) return;
-      setSession(patchImage(sessionRef.current, p.id, imageId, { quality: "loading" }));
-      scorePhoto(sessionIdRef.current || crypto.randomUUID(), image, p.name)
-        .then((q) => setSession(patchImage(sessionRef.current, p.id, imageId, { quality: q ?? "error" })))
-        .catch(() => setSession(patchImage(sessionRef.current, p.id, imageId, { quality: "error" })));
-    },
-    [setSession],
-  );
   const closeViewer = useCallback(() => setViewer(null), []);
 
   // Real photos of the product from the shop pages the price research found.
@@ -273,7 +315,8 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     async (id: string) => {
       const p = sessionRef.current.products.find((x) => x.id === id);
       if (!p || p.priceCheck?.status !== "done") return;
-      const found = await webPhotos(sessionIdRef.current, p.priceCheck.sources.map((s) => s.url)).catch(() => []);
+      const pages = [...p.priceCheck.sources.map((s) => s.url), ...(p.priceCheck.photoPages ?? [])];
+      const found = await webPhotos(sessionIdRef.current, pages).catch(() => []);
       let next = sessionRef.current;
       for (const ph of found.slice(0, 3)) {
         next = addImage(next, id, { id: crypto.randomUUID(), url: ph.image, source: "web", pending: false, credit: ph.site });
@@ -283,23 +326,42 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     [setSession],
   );
 
-  // As soon as a product is cut out: its studio photo, then (once named) photos guided by
-  // the web and the product research (exact name, description, prices in Morocco).
+  // As soon as a product is cut out and named: the product research (exact name, description,
+  // prices in Morocco), up to 3 photos from the shops it found, and one AI photo from another angle
+  // (more on request, button or voice). Once all are in, best photo first.
   const researchProduct = useCallback(
-    async (id: string, image: ProductImage) => {
+    async (id: string) => {
       const product = sessionRef.current.products.find((p) => p.id === id);
       if (!product || product.research !== "idle" || product.status !== "active") return;
       setSession(patchProduct(sessionRef.current, id, { research: "running" }));
-      const studio = runStudio(id, image);
       await identifyingRef.current.get(id);
+      // Before any search: the shared catalog may know it, then the research can reuse its prices.
+      const named = sessionRef.current.products.find((p) => p.id === id);
+      const known = named && !named.barcode ? await matchCatalog(sessionIdRef.current, named).catch(() => null) : null;
+      if (known) {
+        const now = sessionRef.current.products.find((p) => p.id === id);
+        if (now) {
+          const name = [known.brand, known.name, known.quantity].filter(Boolean).join(" ");
+          let next = patchProduct(sessionRef.current, id, { ...aiPatch(now, { name }), barcode: now.barcode ?? known.barcode, category: now.category ?? known.category });
+          if (known.image_url) next = addImage(next, id, { id: crypto.randomUUID(), url: known.image_url, source: "web", pending: false, credit: "Open Facts" });
+          setSession(next);
+        }
+      }
       await Promise.allSettled([
-        studio,
         runEffect({ kind: "better_photos", productId: id }),
         Promise.resolve(runEffect({ kind: "check_price", productId: id })).then(() => runWebPhotos(id)),
       ]);
+      // The name came from the catalog and the research could not confirm it: the photos still
+      // give a description.
+      if (!sessionRef.current.products.find((p) => p.id === id)?.description) {
+        runIdentify(id, true);
+        await identifyingRef.current.get(id);
+      }
+      await rankPhotos(id);
+      await cleanPhoto(id);
       setSession(patchProduct(sessionRef.current, id, { research: "done" }));
     },
-    [runEffect, runStudio, runWebPhotos, setSession],
+    [cleanPhoto, rankPhotos, runEffect, runIdentify, runWebPhotos, setSession],
   );
 
   // ---------- capture: keyframe -> instant card -> SAM cutout ----------
@@ -335,87 +397,196 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     [refreshMetrics, setSession],
   );
 
+  // A barcode makes the product certain: its exact name and the catalog's photo of that very
+  // product. True when the catalog knows it.
+  const applyBarcode = useCallback(
+    async (id: string, code: string) => {
+      const p = sessionRef.current.products.find((x) => x.id === id);
+      if (p && !p.barcode) setSession(patchProduct(sessionRef.current, id, { barcode: code }));
+      const known = await catalogProduct(code).catch(() => null);
+      const now = sessionRef.current.products.find((x) => x.id === id);
+      if (!known || !now) return false;
+      const name = [known.brand, known.name, known.quantity].filter(Boolean).join(" ");
+      let next = patchProduct(sessionRef.current, id, { ...aiPatch(now, { name }), category: now.category ?? known.category });
+      if (known.image_url && !now.images.some((i) => i.url === known.image_url)) {
+        next = addImage(next, id, { id: crypto.randomUUID(), url: known.image_url, source: "web", pending: false, credit: "Open Facts", verified: true });
+      }
+      setSession(next);
+      caption(`Produit reconnu : ${name}`, "heard");
+      return true;
+    },
+    [caption, setSession],
+  );
+
+  // The frame on screen, plus a real photo where the phone can take one at the same moment.
+  const grab = useCallback(
+    (video: HTMLVideoElement, box: Box, point?: { x: number; y: number }): Keyframe => ({
+      ...grabKeyframe(video, box, point),
+      still: stillsRef.current?.(video),
+    }),
+    [],
+  );
+
+  // A barcode read on a shot. The same code as another product: this is that product. A second
+  // code on the same product: the merchant moved on without "+", so the shot starts a new product.
+  const onShotBarcode = useCallback(
+    (id: string, imageId: string, code: string) => {
+      const product = sessionRef.current.products.find((p) => p.id === id);
+      const image = product?.images.find((i) => i.id === imageId);
+      if (!product || !image || sameBarcode(product.barcode, code)) return;
+      const twin = sessionRef.current.products.find((p) => p.id !== id && sameBarcode(p.barcode, code) && p.status !== "removing");
+      if (twin) {
+        shotsRef.current.delete(imageId);
+        if (product.images.length > 1) {
+          setSession(dropImage(sessionRef.current, id, imageId));
+        } else {
+          sigsRef.current.delete(id);
+          setSession(patchProduct(sessionRef.current, id, { status: "removing" }));
+          setTimeout(() => setSession(purgeRemoved(sessionRef.current)), 450);
+        }
+        selectExisting(twin.id, 1);
+        beep(audioCtxRef.current);
+        caption(`Déjà dans la boutique : ${displayName(twin)}`, "heard");
+        return;
+      }
+      if (product.barcode && product.collecting && product.images.length === 1) {
+        setSession(patchProduct(sessionRef.current, id, { barcode: code })); // read on the photo itself: more certain
+        return;
+      }
+      if (product.barcode && product.collecting) {
+        const newId = crypto.randomUUID();
+        const shot = shotsRef.current.get(imageId);
+        if (shot) shot.productId = newId;
+        sigsRef.current.set(newId, { crops: shot ? [shot.sig] : [], cutouts: [] });
+        let next = dropImage(sessionRef.current, id, imageId);
+        next = addCaptured(next, { id: newId, imageId, label: null, ghostUrl: image.url });
+        next = patchImage(next, newId, imageId, { pending: image.pending });
+        setSession(patchProduct(next, newId, { barcode: code }));
+        jobsRef.current.set(newId, [...(jobsRef.current.get(id) ?? [])]);
+        void finishRef.current(id);
+        beep(audioCtxRef.current);
+        caption("Autre code-barres : nouveau produit", "heard");
+        return;
+      }
+      if (product.barcode) return; // finished, with its barcode: this one is something else in the picture
+      setSession(patchProduct(sessionRef.current, id, { barcode: code }));
+      setFlash({ id, n: Date.now() });
+      beep(audioCtxRef.current);
+      caption(`Code-barres lu : ${code}`, "heard");
+      if (!product.collecting) void applyBarcode(id, code);
+    },
+    [applyBarcode, caption, selectExisting, setSession],
+  );
+
   const capture = useCallback(
-    (k: Keyframe, label: string | null, mode: "auto" | "voice" | "tap") => {
+    (k: Keyframe, label: string | null, mode: "auto" | "voice" | "tap" | "import", into?: string) => {
       const triggeredAt = performance.now();
-      lastCaptureAtRef.current = triggeredAt;
+      activityRef.current = triggeredAt;
       sceneRef.current.captured(triggeredAt); // wait for the phone to move before the next auto shot
-      const crop = signature(k.canvas, innerRegion(k.box));
-      const attachTo = sessionRef.current.products.find(
-        (p) => p.id === attachIdRef.current && p.status !== "removing",
-      );
-      const dedupe = !attachTo && mode !== "tap";
-      if (dedupe) {
-        const match = bestMatch(crop, "crops");
+      const sig = signature(k.canvas, innerRegion(k.box));
+      const list = sessionRef.current.products;
+      const attachTo =
+        mode === "import" ? list.find((p) => p.id === into && p.collecting) : list.find((p) => p.id === attachIdRef.current && p.status !== "removing");
+      // Until "+", every shot belongs to the product being shot.
+      const target = attachTo ?? (mode === "import" ? undefined : list.find((p) => p.collecting && p.status === "active"));
+
+      if (target) {
+        const own = [...shotsRef.current].filter(([imageId, s]) => s.productId === target.id && target.images.some((i) => i.id === imageId));
+        const twin = own.map(([imageId, s]) => ({ imageId, s, score: similarity(sig, s.sig) })).sort((x, y) => y.score - x.score)[0];
+        if (twin && twin.score >= SAME_SHOT) {
+          // Nearly the same picture: only the sharper one stays.
+          if (!clearlySharper(k, twin.s.k)) return target.id;
+          shotsRef.current.delete(twin.imageId);
+          setSession(dropImage(sessionRef.current, target.id, twin.imageId));
+        } else if (own.length >= MAX_SHOTS) {
+          if (mode === "tap") caption(`${MAX_SHOTS} photos maximum. Touchez + pour le produit suivant.`, "heard");
+          return target.id;
+        }
+      } else if (mode === "auto" || mode === "voice") {
+        const match = bestMatch(sig, "crops");
         metricsRef.current.lastSimilarity = match?.score ?? null;
         if (match && match.score >= SAME_CROP) {
-          sigsOf(match.id).crops.push(crop); // one more view of it for next time
+          sigsOf(match.id).crops.push(sig); // one more view of it for next time
           selectExisting(match.id, match.score);
           return match.id;
         }
       }
 
       const imageId = crypto.randomUUID();
-      const ghostUrl = ghostCrop(k);
-      const id = attachTo?.id ?? crypto.randomUUID();
-      sigsOf(id).crops.push(crop);
-      // One product per "+" below; one extra photo per "+" on a card.
-      setArmed(false);
-      if (attachTo) setAttach(null);
-      // Shutter: flash, click, and the shot flies from where it was taken into its card.
-      shutter(audioCtxRef.current);
-      setShutterN((n) => n + 1);
-      const from = videoRef.current ? screenRect(videoRef.current, k) : null;
-      if (from) setShots((list) => [...list, { id: imageId, url: ghostUrl, from, productId: id }]);
+      const preview = previewOf(k);
+      const id = target?.id ?? crypto.randomUUID();
+      sigsOf(id).crops.push(sig);
+      shotsRef.current.set(imageId, { k, sig, productId: id });
+      if (mode !== "import") {
+        if (attachTo) setAttach(null);
+        // Shutter: flash, click, and the shot flies from where it was taken into its card.
+        shutter(audioCtxRef.current);
+        setShutterN((n) => n + 1);
+        const from = videoRef.current ? screenRect(videoRef.current, k) : null;
+        if (from) setShots((list) => [...list, { id: imageId, url: preview, from, productId: id }]);
+        if (!target) void stopListeningRef.current(); // on to the next product
+      }
       setSession(
-        attachTo
-          ? addImage(sessionRef.current, id, { id: imageId, url: ghostUrl, source: "camera", pending: true })
-          : addCaptured(sessionRef.current, { id, imageId, label, ghostUrl }),
+        target
+          ? addImage(sessionRef.current, id, { id: imageId, url: preview, source: "camera", pending: true })
+          : addCaptured(sessionRef.current, { id, imageId, label, ghostUrl: preview }),
       );
       navigator.vibrate?.(30);
-      segment(sessionIdRef.current, k)
-        .then((cut) => {
-          const ms = performance.now() - triggeredAt;
-          if (cut && dedupe) {
-            const match = bestMatch(cut.sig, "cutouts", id);
-            if (match && match.score >= SAME_CUTOUT) {
-              // A copy slipped through: drop the new card, keep the original.
-              sigsOf(match.id).crops.push(crop);
-              sigsRef.current.delete(id);
-              setSession(patchProduct(sessionRef.current, id, { status: "removing" }));
-              setTimeout(() => setSession(purgeRemoved(sessionRef.current)), 450);
-              selectExisting(match.id, match.score);
-              return;
-            }
-          }
-          if (cut) sigsOf(id).cutouts.push(cut.sig);
-          let next = patchImage(
-            sessionRef.current,
-            id,
-            imageId,
-            cut ? { url: cut.url, cutoutUrl: cut.cutoutUrl, pending: false } : { pending: false },
-          );
-          const product = next.products.find((p) => p.id === id);
-          if (cut && product && !product.color) next = patchProduct(next, id, { color: cut.color });
-          setSession(next);
-          const img = next.products.find((p) => p.id === id)?.images.find((i) => i.id === imageId);
-          if (cut && !attachTo && img) {
-            runIdentify(id);
-            void researchProduct(id, img);
-          }
-          // A photo added later to a product gets its studio version too.
-          if (cut && attachTo && img) void runStudio(id, img);
-          if (cut) metricsRef.current.capture.push({ at: Date.now(), ms, parts: { sam: cut.samMs } });
-          refreshMetrics();
-        })
-        .catch((err: unknown) => {
-          setSession(patchImage(sessionRef.current, id, imageId, { pending: false }));
-          caption(err instanceof SegmentError ? err.message : "Segmentation failed", "error");
-        });
+
+      // The photo and its barcode cost nothing; "+" waits for both before anything is paid for.
+      const photo = photoOf(k)
+        .then((url) => setSession(patchImage(sessionRef.current, shotsRef.current.get(imageId)?.productId ?? id, imageId, { url, pending: false })))
+        .catch(() => setSession(patchImage(sessionRef.current, shotsRef.current.get(imageId)?.productId ?? id, imageId, { pending: false })));
+      const scan = readShot(k)
+        .then((code) => code && onShotBarcode(shotsRef.current.get(imageId)?.productId ?? id, imageId, code))
+        .catch(() => {});
+      jobsRef.current.set(id, [...(jobsRef.current.get(id) ?? []), photo, scan]);
+      if (attachTo && !attachTo.collecting) void Promise.all([photo, scan]).then(() => rankPhotos(id));
+      if (!target && mode !== "import") {
+        window.setTimeout(() => {
+          const p = sessionRef.current.products.find((x) => x.id === id);
+          if (p?.collecting && !p.barcode) caption("Montrez le code-barres, ou touchez + si c'est tout", "heard");
+        }, BARCODE_HINT_MS);
+      }
       return id;
     },
-    [bestMatch, caption, refreshMetrics, researchProduct, runIdentify, runStudio, selectExisting, setArmed, setAttach, setSession],
+    [bestMatch, caption, onShotBarcode, rankPhotos, selectExisting, setAttach, setSession],
   );
+
+  // "+": the product is complete. Only now is anything searched, from all its photos. A pack from
+  // a video is not searched (`search` false): it is the merchant's own lot, and the web would only
+  // name one of its items.
+  const finishProduct = useCallback(
+    async (id: string, search = true) => {
+      const started = sessionRef.current.products.find((p) => p.id === id);
+      if (!started?.collecting) return;
+      setSession(patchProduct(sessionRef.current, id, { collecting: false }));
+      await Promise.allSettled(jobsRef.current.get(id) ?? []);
+      jobsRef.current.delete(id);
+      const p = sessionRef.current.products.find((x) => x.id === id);
+      if (!p || p.status !== "active" || !p.images.length) return;
+      if (search) {
+        const known = p.barcode ? await applyBarcode(id, p.barcode) : false;
+        if (!known) runIdentify(id);
+        await researchProduct(id);
+      } else setSession(patchProduct(sessionRef.current, id, { research: "done" }));
+      // Full frames take a lot of memory; the signatures stay, to recognise the product later.
+      for (const [imageId, shot] of shotsRef.current) if (shot.productId === id) shotsRef.current.delete(imageId);
+    },
+    [applyBarcode, researchProduct, runIdentify, setSession],
+  );
+  useEffect(() => {
+    finishRef.current = finishProduct;
+  }, [finishProduct]);
+
+  // Auto-capture rests while a product's sheet is open, and comes back when it closes.
+  useEffect(() => {
+    setArmed(!open);
+  }, [open, setArmed]);
+
+  const finishCollecting = useCallback(() => {
+    for (const p of sessionRef.current.products) if (p.collecting) void finishProduct(p.id);
+  }, [finishProduct]);
 
   // ---------- barcodes seen while filming ----------
   // A barcode in view goes to the current product. If another product already has it, that
@@ -429,11 +600,11 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
         return;
       }
       const st = sessionRef.current;
-      const owner = st.products.find((p) => p.barcode === code && p.status !== "removing");
+      const owner = st.products.find((p) => sameBarcode(p.barcode, code) && p.status !== "removing");
       const cur = st.products.find((p) => p.id === st.currentId && p.status !== "removing");
       if (owner) {
         if (owner.id === cur?.id) return;
-        if (cur && !cur.barcode && now - cur.capturedAt < 8000) {
+        if (cur?.collecting && !cur.barcode && cur.images.length === 1 && now - cur.capturedAt < 8000) {
           sigsRef.current.delete(cur.id);
           setSession(patchProduct(sessionRef.current, cur.id, { status: "removing" }));
           setTimeout(() => setSession(purgeRemoved(sessionRef.current)), 450);
@@ -444,12 +615,13 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
         caption(`Déjà dans la boutique : ${displayName(owner)}`, "heard");
         return;
       }
-      if (cur && !cur.barcode) {
+      // A finished product takes no code from the live view: it may be the next item's.
+      if (cur?.collecting && !cur.barcode) {
         lastCodeRef.current = { code, at: now };
         setSession(patchProduct(sessionRef.current, cur.id, { barcode: code }));
         setFlash({ id: cur.id, n: now });
         beep(audioCtxRef.current);
-        caption(`Code-barres ajouté : ${code}`, "heard");
+        caption(`Code-barres lu : ${code}`, "heard");
       }
     },
     [caption, selectExisting, setSession],
@@ -460,43 +632,109 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     return { x: (v.videoWidth - s) / 2, y: (v.videoHeight - s) / 2, w: s, h: s };
   };
 
+  // The detector rests between looks, so a shot or a spoken "hada" asks it where the product is now.
+  const detectNow = useCallback((video: HTMLVideoElement) => {
+    const detector = detectorRef.current;
+    if (detector) targetRef.current = pickTarget(detector, video, performance.now(), targetRef.current);
+    return targetRef.current;
+  }, []);
+
+  // ---------- pause when nothing happens ----------
+  // Stopping the camera is what lets the phone cool: the sensor, the detector and the screen.
+  const pauseCamera = useCallback(() => {
+    pausedRef.current = true;
+    void stopListeningRef.current();
+    setPaused(true);
+    streamRef.current?.getVideoTracks().forEach((t) => t.stop());
+    stillsRef.current = null;
+    void wakeLockRef.current?.release().catch(() => {});
+    targetRef.current = null;
+    drawBoxRef.current = null;
+    paintRef.current = "";
+    const c = overlayRef.current;
+    c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
+  }, []);
+
+  const resumeCamera = useCallback(async () => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream || resumingRef.current) return;
+    resumingRef.current = true;
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({ video: LIVE_VIDEO });
+      stream.getVideoTracks().forEach((t) => stream.removeTrack(t));
+      const track = fresh.getVideoTracks()[0];
+      stream.addTrack(track);
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+      stillsRef.current = await openStills(track);
+      wakeLockRef.current = (await navigator.wakeLock?.request("screen").catch(() => null)) ?? null;
+      activityRef.current = performance.now();
+      pausedRef.current = false;
+      setPaused(false);
+    } catch (err) {
+      console.error("camera did not resume:", err); // the pause screen stays: another touch tries again
+    } finally {
+      resumingRef.current = false;
+    }
+  }, []);
+
   // ---------- detection loop ----------
   const step = useCallback(() => {
+    if (pausedRef.current) return;
     const video = videoRef.current;
     const canvas = overlayRef.current;
     const detector = detectorRef.current;
     if (!video || !canvas || video.readyState < 2) return;
     const now = performance.now();
+    if (now - activityRef.current > IDLE_PAUSE_MS) return pauseCamera();
 
     // The scene trigger needs no model, so auto-capture works from the first second; the
     // detector joins once it has loaded (it can take a while on a slow connection).
-    if (now - lastDetectRef.current >= DETECT_EVERY_MS) {
-      lastDetectRef.current = now;
-      let target: Target | null = null;
-      if (detector) {
+    if (now - lastLookRef.current >= LOOK_EVERY_MS) {
+      lastLookRef.current = now;
+      const looking = armedRef.current && !framingRef.current;
+      let detected = false;
+      let held = false;
+      if (looking && !sceneBusyRef.current) held = sceneRef.current.update(video, now);
+      if (sceneRef.current.moved) triggerRef.current.forget();
+      if (!looking || !sceneRef.current.steady) {
+        targetRef.current = null; // the detector only runs on a steady picture: let it rest
+        triggerRef.current.interrupt();
+      } else if (detector && !hotRef.current && now >= nextDetectRef.current) {
         const t0 = performance.now();
-        target = pickTarget(detector, video, now, targetRef.current);
+        const found = pickTarget(detector, video, now, targetRef.current);
+        const ms = performance.now() - t0;
         const m = metricsRef.current;
-        m.detectMs.push(performance.now() - t0);
+        m.detectMs.push(ms);
         if (m.detectMs.length > 300) m.detectMs.shift();
-        if (target && m.firstHighlightMs == null) {
+        if (found && m.firstHighlightMs == null) {
           m.firstHighlightMs = now - startedAtRef.current;
           refreshMetrics();
         }
+        targetRef.current = found;
+        detected = true;
+        nextDetectRef.current = performance.now() + Math.min(DETECT_MAX_GAP_MS, Math.max(DETECT_MIN_GAP_MS, ms * DETECT_REST));
       }
-      targetRef.current = target;
-      if (armedRef.current && !framingRef.current) {
+      if (looking) {
+        const target = targetRef.current;
         const W = video.videoWidth;
         const H = video.videoHeight;
         const centered = !!target && coversCenter(target.box, W, H);
-        if (triggerRef.current.update(target, W, H, now) && target) {
-          capture(grabKeyframe(video, target.box), target.label, "auto");
+        // Only a new detection counts: the same answer read twice would look like a still product.
+        if (detected && triggerRef.current.update(target, W, H, now) && target) {
+          capture(grab(video, target.box), target.label, "auto");
         } else if (centered) {
           sceneRef.current.restart(now);
-        } else if (!sceneBusyRef.current && sceneRef.current.update(video, now)) {
+        } else if (held) {
           // Nothing the detector knows in the middle, but the phone is held still on something:
           // ask the model whether a product is there and where, then cut out only that.
-          const k = grabKeyframe(video, centerBox(video), { x: W / 2, y: H / 2 });
+          const k = grab(video, centerBox(video), { x: W / 2, y: H / 2 });
+          // Another angle of the product being shot: no need to ask what it is.
+          if (sessionRef.current.products.some((p) => p.collecting)) {
+            capture(k, null, "auto");
+            return;
+          }
           sceneBusyRef.current = true;
           void locateProduct(sessionIdRef.current, k.canvas, k.point!, "held").then((found) => {
             sceneBusyRef.current = false;
@@ -517,16 +755,21 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     }
     const live = armedRef.current && !framingRef.current;
     const show = live ? targetRef.current : null;
-    const sceneProgress = sceneBusyRef.current ? 1 : sceneRef.current.progress(now);
-    draw(canvas, video, show, drawBoxRef, show ? triggerRef.current.progress(now) : 0, live && !show ? sceneProgress : 0);
-  }, [capture, handleCode, refreshMetrics]);
+    // The ring in the middle: dotted while the phone moves, green and filling once it is steady.
+    const ring = live && !show ? (sceneBusyRef.current ? 1 : sceneRef.current.progress(now)) : null;
+    const paint = show ? "outline" : `ring ${ring?.toFixed(2)}`;
+    if (show || paint !== paintRef.current) {
+      draw(canvas, video, show, drawBoxRef, show ? triggerRef.current.progress(now) : 0, ring);
+      paintRef.current = paint;
+    }
+  }, [capture, grab, handleCode, pauseCamera, refreshMetrics]);
 
   // ---------- voice: chunk -> transcript -> (cue capture) -> agent -> UI ----------
   const handleChunk = useCallback(
     (wav: ArrayBuffer, info: { startedAt: number; endedAt: number }) => {
-      const snap = speechSnapRef.current;
-      const label = targetRef.current?.label ?? null;
       const pendingId = caption("…", "pending");
+      // The answer may come after the next shot: what was said belongs to the product of that moment.
+      const spokenAbout = sessionRef.current.currentId;
       queueRef.current = queueRef.current.then(async () => {
         try {
           const tr = await fetch(`/api/transcribe?sessionId=${sessionIdRef.current}`, {
@@ -542,14 +785,8 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
             setCaptions((l) => l.filter((c) => c.id !== pendingId));
             return;
           }
+          activityRef.current = performance.now(); // real words, not the noise of the shop
           caption(text, "heard", pendingId);
-
-          // "this one" / "hada" captures the frame from when the merchant started talking,
-          // unless the held-still trigger already took one during this sentence.
-          // When no new product is expected, "hada" just means the current one.
-          if (armedRef.current && CUE.test(text) && snap && lastCaptureAtRef.current < info.startedAt - 1500) {
-            capture(snap, label, "voice");
-          }
 
           const ar = await fetch("/api/agent", {
             method: "POST",
@@ -557,15 +794,15 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
             body: JSON.stringify({
               sessionId: sessionIdRef.current,
               transcript: text,
-              state: agentView(sessionRef.current),
+              state: agentView({ ...sessionRef.current, currentId: spokenAbout }),
             }),
           });
           const aj = (await ar.json()) as { calls?: ToolCall[]; message?: string };
           if (!ar.ok) throw new Error(aj.message ?? "Agent failed");
           const calls = aj.calls ?? [];
           if (!calls.length) return;
-          const applied = applyCalls(sessionRef.current, calls, () => crypto.randomUUID());
-          setSession(applied.state);
+          const applied = applyCalls({ ...sessionRef.current, currentId: spokenAbout }, calls, () => crypto.randomUUID());
+          setSession({ ...applied.state, currentId: sessionRef.current.currentId });
           if (applied.question) caption(applied.question, "question");
           applied.effects.forEach(runEffect);
           if (applied.state.products.some((p) => p.status === "removing")) {
@@ -585,8 +822,62 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
         }
       });
     },
-    [caption, capture, refreshMetrics, runEffect, setSession],
+    [caption, refreshMetrics, runEffect, setSession],
   );
+
+  // ---------- the microphone, after "+" ----------
+  // What the merchant says then goes to the AI for the product just finished. Nothing listens
+  // while shooting: most of what a phone hears there is the shop.
+  const stopListening = useCallback(async () => {
+    listenRunRef.current++;
+    const voice = voiceRef.current;
+    voiceRef.current = null;
+    setListening(false);
+    setSpeaking(false);
+    await voice?.stop();
+  }, []);
+
+  const listen = useCallback(() => {
+    void stopListening();
+    const run = ++listenRunRef.current;
+    const ctx = new AudioContext(); // in the tap: iOS keeps a later one silent
+    let timer = 0;
+    const later = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => void stopListening(), LISTEN_MS);
+    };
+    setListening(true);
+    later();
+    void (async () => {
+      const mic = await openMicrophone();
+      const voice = await startVoice(ctx, mic, {
+        onSpeechStart: later,
+        onChunk: (wav, info) => {
+          later();
+          handleChunk(wav, info);
+        },
+        onLevel: (_rms, talking) => setSpeaking(talking),
+      });
+      const close = {
+        stop: async () => {
+          clearTimeout(timer);
+          await voice.stop();
+          mic.getTracks().forEach((t) => t.stop());
+        },
+      };
+      if (run === listenRunRef.current) voiceRef.current = close;
+      else await close.stop(); // closed before it finished opening
+    })().catch((err: unknown) => {
+      clearTimeout(timer);
+      setListening(false);
+      void ctx.close().catch(() => {});
+      caption(`Micro indisponible : ${err instanceof Error ? err.message : String(err)}`, "error");
+    });
+  }, [caption, handleChunk, stopListening]);
+
+  useEffect(() => {
+    stopListeningRef.current = stopListening;
+  }, [stopListening]);
 
   // ---------- start / stop ----------
   const start = useCallback(async () => {
@@ -595,18 +886,20 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     audioCtxRef.current = audioCtx;
     setPhase("starting");
     setHelp(null);
-    setUpload(null);
     sessionIdRef.current = crypto.randomUUID();
     savedRef.current = new Map(); // a new session: products saved before stay saved
     metricsRef.current = emptyMetrics();
     refreshMetrics();
-    setSession(initialSession(sessionRef.current.currency));
+    // Products imported from a video may still be getting their photos and prices.
+    const busy = sessionRef.current.products.filter((p) => p.research === "running" || p.images.some((i) => i.pending));
+    setSession({ ...initialSession(sessionRef.current.currency), products: busy });
     setAttach(null);
     setOpen(null);
     setDismissed([]);
     setConfirmId(null);
     setArmed(true);
     sigsRef.current.clear();
+    shotsRef.current.clear();
     setCaptions([]);
 
     // The camera is the only step that must work; the others degrade with a caption.
@@ -620,53 +913,27 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
       return;
     }
     streamRef.current = stream;
+    activityRef.current = performance.now();
+    pausedRef.current = false;
+    setPaused(false);
     const video = videoRef.current!;
     video.muted = true;
     video.playsInline = true;
     video.srcObject = stream;
     await video.play().catch(() => caption("Touchez l'écran si l'image reste figée", "pending"));
     startedAtRef.current = performance.now();
-
-    try {
-      const mime = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm"].find((t) =>
-        MediaRecorder.isTypeSupported(t),
-      );
-      const chunks: Blob[] = [];
-      const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 2_500_000 });
-      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-      rec.onstop = () =>
-        uploadVideo(
-          new Blob(chunks, { type: rec.mimeType }),
-          sessionIdRef.current,
-          (performance.now() - startedAtRef.current) / 1000,
-          setUpload,
-        );
-      rec.start(1000);
-      recorderRef.current = rec;
-    } catch {
-      recorderRef.current = null;
-      setUpload("not recorded on this phone");
-    }
-
-    try {
-      voiceRef.current = await startVoice(audioCtx, stream, {
-        onSpeechStart: () => {
-          const v = videoRef.current;
-          if (v) speechSnapRef.current = grabKeyframe(v, targetRef.current?.box ?? centerBox(v));
-        },
-        onChunk: handleChunk,
-        onLevel: (rms, speaking) => setLevel({ rms, speaking }),
-      });
-    } catch (err) {
-      caption(`Micro indisponible : ${err instanceof Error ? err.message : String(err)}`, "error");
-    }
+    void openStills(stream.getVideoTracks()[0]).then((take) => (stillsRef.current = take));
 
     warmUpBarcodes();
     wakeLockRef.current = (await navigator.wakeLock?.request("screen").catch(() => null)) ?? null;
+    pressureRef.current = watchPressure((hot) => (hotRef.current = hot));
     setPhase("recording");
+    // A timer between animation frames, so a 120 Hz screen does not wake this 120 times a second.
     const frame = () => {
       step();
-      loopRef.current = requestAnimationFrame(frame);
+      pauseRef.current = window.setTimeout(() => {
+        loopRef.current = requestAnimationFrame(frame);
+      }, PAINT_EVERY_MS);
     };
     loopRef.current = requestAnimationFrame(frame);
 
@@ -679,9 +946,33 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
         })
         .catch(() => setDetectorState("failed"));
     }
-  }, [caption, handleChunk, step, refreshMetrics, setArmed, setAttach, setSession]);
+  }, [caption, step, refreshMetrics, setArmed, setAttach, setSession]);
 
-  useImperativeHandle(ref, () => ({ start: () => void start() }), [start]);
+  // Products confirmed from a video go through the same steps as filmed ones and save as drafts:
+  // several views, as if shot one after the other, then "+". A name the merchant corrected is
+  // theirs; the video AI's own name is only a first guess, which the recognition may replace.
+  const importProducts = useCallback(
+    (items: ImportedProduct[]) => {
+      sessionIdRef.current ||= crypto.randomUUID();
+      for (const item of items) {
+        const id = capture(item.frame, item.name || null, "import");
+        if (!id) continue;
+        for (const view of item.views) capture(view, null, "import", id);
+        let next = editProduct(sessionRef.current, id, {
+          price: item.price,
+          ...(item.named && item.name ? { name: item.name } : {}),
+          ...(item.contents ? { description: item.contents } : {}),
+        });
+        const p = next.products.find((x) => x.id === id);
+        if (p && !item.named && item.name) next = patchProduct(next, id, aiPatch(p, { name: item.name }));
+        setSession(next);
+        void finishProduct(id, !item.contents);
+      }
+    },
+    [capture, finishProduct, setSession],
+  );
+
+  useImperativeHandle(ref, () => ({ start: () => void start(), importProducts }), [importProducts, start]);
 
   // ---------- drafts: every product is saved to the store while it changes ----------
   useEffect(() => {
@@ -710,23 +1001,31 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
   };
 
   const stop = useCallback(async () => {
+    finishCollecting();
+    clearTimeout(pauseRef.current);
     cancelAnimationFrame(loopRef.current);
-    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
-    await voiceRef.current?.stop();
-    voiceRef.current = null;
+    await stopListening();
+    void audioCtxRef.current?.close().catch(() => {});
     streamRef.current?.getTracks().forEach((t) => t.stop());
     await wakeLockRef.current?.release().catch(() => {});
+    pressureRef.current?.disconnect();
+    pressureRef.current = null;
+    stillsRef.current = null;
+    pausedRef.current = false;
+    setPaused(false);
     targetRef.current = null;
     drawBoxRef.current = null;
     const c = overlayRef.current;
     c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
-    setLevel({ rms: 0, speaking: false });
+    setSpeaking(false);
+    paintRef.current = "";
     setPhase("stopped");
     audioCtxRef.current = null;
-  }, []);
+  }, [finishCollecting, stopListening]);
 
   useEffect(
     () => () => {
+      clearTimeout(pauseRef.current);
       cancelAnimationFrame(loopRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
     },
@@ -769,7 +1068,7 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     };
     if (box.w < 8 || box.h < 8) return;
     triggerRef.current.markManualCapture(box, performance.now());
-    capture(grabKeyframe(v, box), null, "tap");
+    capture(grab(v, box), null, "tap");
   };
 
   // The whole product under the finger, found by the AI, as a frame on screen.
@@ -796,16 +1095,16 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     const v = videoRef.current;
     if (!v || v.readyState < 2) return;
     if (frameApi.current?.take()) return;
-    const t = targetRef.current;
+    const t = detectNow(v);
     if (t && coversCenter(t.box, v.videoWidth, v.videoHeight)) {
       triggerRef.current.markManualCapture(t.box, performance.now());
-      capture(grabKeyframe(v, t.box), t.label, "tap");
+      capture(grab(v, t.box), t.label, "tap");
       return;
     }
     const side = Math.min(v.videoWidth, v.videoHeight) * 0.6;
     const box: Box = { x: (v.videoWidth - side) / 2, y: (v.videoHeight - side) / 2, w: side, h: side };
     triggerRef.current.markManualCapture(box, performance.now());
-    capture(grabKeyframe(v, box, { x: v.videoWidth / 2, y: v.videoHeight / 2 }), null, "tap");
+    capture(grab(v, box, { x: v.videoWidth / 2, y: v.videoHeight / 2 }), null, "tap");
   };
 
   const products = [...session.products].sort((a, b) => b.order - a.order);
@@ -821,14 +1120,12 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
   };
   const onOpen = (id: string, from: DOMRect) => {
     setSession({ ...sessionRef.current, currentId: id }); // voice commands now apply to it
-    setArmed(false); // editing, not filming the next product
     setOpen({ id, from });
   };
   // "+" on a card: the next photo (automatic or framed) is added to that product.
   const onAttach = (id: string) => {
     const on = attachIdRef.current !== id;
     setAttach(on ? id : null);
-    setArmed(on);
   };
 
   // One line of text at a time, centered above the record button. Most recent first:
@@ -842,7 +1139,7 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
         ? [...session.products].sort((a, b) => a.order - b.order)
         : [];
   const question =
-    level.speaking || open
+    speaking || open
       ? null
       : (candidates
           .map((p) => (p ? nextQuestion(p) : null))
@@ -853,9 +1150,10 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
     if (el) onOpen(id, el.getBoundingClientRect());
   };
   const recording = phase === "recording";
+  const collecting = session.products.some((p) => p.collecting);
 
   return (
-    <main className={`fixed inset-0 overflow-hidden select-none ${phase === "idle" ? "bg-white text-ink" : "bg-black text-white"}`}>
+    <main className={`fixed inset-0 overflow-hidden select-none ${phase === "idle" ? "bg-white text-ink" : "bg-black text-white"}`} onPointerDownCapture={() => (activityRef.current = performance.now())}>
       <video
         ref={videoRef}
         playsInline
@@ -875,6 +1173,17 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
             setFraming(state === "frame");
           }}
         />
+      )}
+
+      {paused && (
+        <button
+          type="button"
+          onClick={() => void resumeCamera()}
+          className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-1 bg-black/85 px-6 text-center text-white"
+        >
+          <span className="text-lg font-semibold">Caméra en pause</span>
+          <span className="text-sm text-white/75">Touchez l&apos;écran pour reprendre</span>
+        </button>
       )}
 
       {phase === "idle" && (
@@ -922,13 +1231,14 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
       {/* top bar */}
       <div className="absolute inset-x-0 top-0 flex items-center gap-2 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] text-xs">
         {recording && (
-          <span className="flex items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1 font-medium backdrop-blur">
+          <span className="flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 font-medium">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" /> REC
           </span>
         )}
-        {recording && detectorState === "loading" && <span className="rounded-full bg-black/45 px-2.5 py-1 backdrop-blur">Préparation…</span>}
+        {listening && <span className="rounded-full bg-brand px-2.5 py-1 font-medium">Je vous écoute : prix, stock…</span>}
+        {recording && detectorState === "loading" && <span className="rounded-full bg-black/60 px-2.5 py-1">Préparation…</span>}
         {recording && detectorState === "failed" && (
-          <span className="rounded-full bg-black/45 px-2.5 py-1 backdrop-blur">Touchez un produit pour le prendre</span>
+          <span className="rounded-full bg-black/60 px-2.5 py-1">Touchez un produit pour le prendre</span>
         )}
         {!onExit && phase === "stopped" && session.products.some((p) => p.status === "active") && (
           <button
@@ -942,7 +1252,7 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
         {debug && (
           <button
             onClick={() => setShowMetrics((v) => !v)}
-            className="ms-auto rounded-full bg-black/45 px-2.5 py-1 font-mono backdrop-blur"
+            className="ms-auto rounded-full bg-black/60 px-2.5 py-1 font-mono"
             aria-label="Latence"
           >
             ⏱ {metricsView.captureP50 != null ? `${(metricsView.captureP50 / 1000).toFixed(1)}s` : "–"} /{" "}
@@ -969,17 +1279,17 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
                 : latest.kind === "question"
                   ? "bg-white font-medium text-ink"
                   : latest.kind === "pending"
-                    ? "bg-black/45 text-white/75 backdrop-blur"
-                    : "bg-black/55 text-white backdrop-blur"
+                    ? "bg-black/60 text-white/75"
+                    : "bg-black/65 text-white"
             }`}
           >
             {latest.text}
           </p>
         ) : framing ? (
-          <p className="rounded-2xl bg-black/55 px-3.5 py-2 text-center text-sm text-white backdrop-blur">
+          <p className="rounded-2xl bg-black/65 px-3.5 py-2 text-center text-sm text-white">
             Ajustez le cadre, puis appuyez sur le bouton
           </p>
-        ) : question && !armed ? (
+        ) : question && !collecting ? (
           <div className="pointer-events-auto flex max-w-[min(92vw,26rem)] items-center gap-2 rounded-2xl bg-white py-1.5 ps-3.5 pe-1.5 text-ink shadow-lg">
             <button type="button" onClick={() => openFromCard(question.productId)} className="min-w-0 flex-1 py-0.5">
               <p dir="auto" className="line-clamp-2 text-center text-sm leading-snug font-medium">
@@ -1017,7 +1327,7 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
             type="button"
             onClick={onExit ? exit : () => void stop()}
             aria-label={onExit ? "Retour au menu" : "Terminer"}
-            className="absolute start-5 top-4 flex h-12 w-12 items-center justify-center rounded-full bg-white/20 text-white ring-1 ring-white/40 backdrop-blur"
+            className="absolute start-5 top-4 flex h-12 w-12 items-center justify-center rounded-full bg-white/20 text-white ring-1 ring-white/40"
           >
             <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
               <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -1032,7 +1342,7 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
             phase === "idle" ? "ring-ink/80" : "ring-white"
           }`}
         >
-          {recording && level.speaking && (
+          {recording && speaking && (
             <>
               <span className="echo" />
               <span className="echo" />
@@ -1043,14 +1353,16 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
             className={`block h-[52px] w-[52px] rounded-full transition-colors duration-200 ${recording ? "bg-white" : "bg-red-500"}`}
           />
         </button>
-        {recording && session.products.length > 0 && (
+        {recording && collecting && (
           <button
             type="button"
-            onClick={() => setArmed(true)}
+            onClick={() => {
+              void finishRef.current(session.products.find((p) => p.collecting)?.id ?? "");
+              listen();
+            }}
             aria-label="Produit suivant"
-            aria-pressed={armed}
-            className={`absolute end-5 top-4 flex h-12 w-12 items-center justify-center rounded-full ring-1 backdrop-blur transition-colors ${
-              armed ? "armed-pulse bg-white text-ink ring-white" : "bg-white/20 text-white ring-white/40"
+            className={`absolute end-5 top-4 flex h-12 w-12 items-center justify-center rounded-full ring-1 transition-colors ${
+              collecting ? "armed-pulse bg-white text-ink ring-white" : "bg-white/20 text-white ring-white/40"
             }`}
           >
             <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
@@ -1092,7 +1404,7 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
         />
       )}
 
-      {debug && showMetrics && <MetricsPanel m={metricsView} upload={upload} onClose={() => setShowMetrics(false)} />}
+      {debug && showMetrics && <MetricsPanel m={metricsView} onClose={() => setShowMetrics(false)} />}
 
       {viewer && viewerProduct && (
         <PhotoViewer
@@ -1101,7 +1413,6 @@ export default function CaptureScreen({ ref, storeId, onExit }: Props = {}) {
           onClose={closeViewer}
           onCover={(imageId) => setSession(makeCover(sessionRef.current, viewer.productId, imageId))}
           onRemove={(imageId) => setSession(dropImage(sessionRef.current, viewer.productId, imageId))}
-          onScore={scoreImage}
         />
       )}
 
@@ -1148,7 +1459,7 @@ function screenRect(video: HTMLVideoElement, k: Keyframe) {
 // The captured photo pops up where it was taken, zooms a little, then flies into its card.
 function FlyingShot({ shot, onDone }: { shot: Shot; onDone: () => void }) {
   const ref = useRef<HTMLImageElement>(null);
-  // The screen re-renders many times a second (mic level); the animation must not restart.
+  // The screen can re-render during the flight; the animation must not restart.
   const done = useRef(onDone);
   useEffect(() => {
     done.current = onDone;
@@ -1186,11 +1497,9 @@ function FlyingShot({ shot, onDone }: { shot: Shot; onDone: () => void }) {
 
 function MetricsPanel({
   m,
-  upload,
   onClose,
 }: {
   m: ReturnType<typeof report>;
-  upload: string | null;
   onClose: () => void;
 }) {
   const s = (v: number | null) => (v == null ? "–" : `${Math.round(v)} ms`);
@@ -1226,7 +1535,6 @@ function MetricsPanel({
           ))}
         </tbody>
       </table>
-      {upload && <p className="mt-2 text-neutral-300">Video: {upload}</p>}
     </div>
   );
 }
@@ -1238,9 +1546,9 @@ function draw(
   target: Target | null,
   smooth: React.RefObject<Box | null>,
   progress: number,
-  sceneProgress: number,
+  ring: number | null,
 ) {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(2, window.devicePixelRatio || 1); // sharper than this is not visible on a thin line
   const cw = canvas.clientWidth;
   const ch = canvas.clientHeight;
   if (canvas.width !== Math.round(cw * dpr)) {
@@ -1252,27 +1560,35 @@ function draw(
   ctx.clearRect(0, 0, cw, ch);
   if (!target) {
     smooth.current = null;
-    // Held still on a product the detector does not know: a ring fills in the middle.
-    if (sceneProgress > 0) {
+    if (ring != null) {
+      const steady = ring > 0;
       ctx.save();
       ctx.lineWidth = 4;
       ctx.lineCap = "round";
-      ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
+      ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
       ctx.shadowBlur = 6;
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+      ctx.setLineDash(steady ? [] : [2, 12]);
+      ctx.strokeStyle = steady ? "rgba(48, 209, 88, 0.35)" : "rgba(255, 255, 255, 0.7)";
       ctx.beginPath();
-      ctx.arc(cw / 2, ch / 2, 22, 0, Math.PI * 2);
+      ctx.arc(cw / 2, ch / 2, 28, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.strokeStyle = "white";
-      ctx.beginPath();
-      ctx.arc(cw / 2, ch / 2, 22, -Math.PI / 2, -Math.PI / 2 + sceneProgress * Math.PI * 2);
-      ctx.stroke();
+      if (steady) {
+        ctx.setLineDash([]);
+        ctx.strokeStyle = "#30d158";
+        ctx.beginPath();
+        ctx.arc(cw / 2, ch / 2, 28, -Math.PI / 2, -Math.PI / 2 + ring * Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "white";
+        ctx.font = "600 14px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Ne bougez plus", cw / 2, ch / 2 + 56);
+      }
       ctx.restore();
     }
     return;
   }
   const prev = smooth.current;
-  const k = 0.45;
+  const k = 0.25;
   const b = prev
     ? {
         x: prev.x + (target.box.x - prev.x) * k,
@@ -1314,34 +1630,3 @@ function draw(
 }
 
 // ---------- raw video -> R2 (in parts through /api/captures, watched in /admin/videos) ----------
-async function uploadVideo(blob: Blob, sessionId: string, seconds: number, onStatus: (s: string) => void) {
-  const mb = (blob.size / 1e6).toFixed(1);
-  if (!blob.size) return onStatus("nothing recorded");
-  const post = (body: object) =>
-    fetch("/api/captures", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  let started: { key: string; uploadId: string; partBytes: number } | null = null;
-  try {
-    onStatus(`${mb} MB, uploading…`);
-    const res = await post({ action: "start", sessionId, contentType: blob.type, bytes: blob.size, seconds });
-    if (!res.ok) throw new Error(`start ${res.status}`);
-    started = (await res.json()) as { key: string; uploadId: string; partBytes: number };
-    const { key, uploadId, partBytes } = started;
-    const parts: { partNumber: number; etag: string }[] = [];
-    for (let n = 1, at = 0; at < blob.size; n++, at += partBytes) {
-      const q = new URLSearchParams({ key, uploadId, part: String(n) });
-      let put: Response | null = null;
-      for (let tries = 0; tries < 3 && !put?.ok; tries++) {
-        put = await fetch(`/api/captures?${q}`, { method: "PUT", body: blob.slice(at, at + partBytes) }).catch(() => null);
-      }
-      if (!put?.ok) throw new Error(`part ${n} ${put?.status ?? "network"}`);
-      parts.push((await put.json()) as { partNumber: number; etag: string });
-      onStatus(`${mb} MB, uploading… ${Math.min(100, Math.round(((at + partBytes) / blob.size) * 100))} %`);
-    }
-    const done = await post({ action: "complete", key, uploadId, parts });
-    if (!done.ok) throw new Error(`complete ${done.status}`);
-    onStatus(`${mb} MB saved (${key})`);
-  } catch (err) {
-    if (started) void post({ action: "abort", key: started.key, uploadId: started.uploadId }).catch(() => {});
-    onStatus(`upload failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}

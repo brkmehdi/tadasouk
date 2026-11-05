@@ -5,10 +5,10 @@
 // A first version also wanted the middle sharper than the edges; shops full of detail behind the
 // product failed it, so the yes or no now comes from the model.
 
-const SIZE = 48; // the picture is looked at 48 pixels wide: cheap enough for every detection tick
+const SIZE = 48; // the picture is looked at 48 pixels wide: cheap enough for every look
 
-const STILL = 0.022; // mean change between two looks (0..1) under which the phone counts as still
-const MOVED = 0.06; // above this the phone was moved: the next still scene is a new one
+const STILL = 0.033; // mean change between two looks (0..1) under which the phone counts as still
+const MOVED = 0.09; // above this the phone was moved: the next still scene is a new one
 const MIN_EDGES = 0.035; // a blank wall or table in the middle is not a product
 
 export type SceneLook = { motion: number; center: number; border: number };
@@ -21,6 +21,8 @@ export class SceneTrigger {
   private lastFireAt = 0;
   private waitForMove = false;
   last: SceneLook | null = null;
+  steady = false; // the picture barely changes
+  moved = false; // the phone was just moved
 
   constructor(
     private holdMs = 1100,
@@ -30,8 +32,10 @@ export class SceneTrigger {
   update(video: HTMLVideoElement, now: number): boolean {
     const look = this.look(video);
     if (!look) return false;
-    if (look.motion > MOVED) this.waitForMove = false;
+    this.moved = look.motion > MOVED;
+    if (this.moved) this.waitForMove = false;
     const still = look.motion < STILL;
+    this.steady = still;
     const product = look.center > MIN_EDGES;
     if (!still || !product || this.waitForMove) {
       this.since = now;

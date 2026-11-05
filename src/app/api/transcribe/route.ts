@@ -3,7 +3,7 @@
 
 import { NextResponse } from "next/server";
 import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
-import { PRICES, reserve, settle } from "@/lib/server/usage";
+import { PRICES, spend } from "@/lib/server/usage";
 
 const MAX_BYTES = 32_000 * 30 + 44; // 30 s of 16 kHz 16-bit mono, plus the WAV header
 
@@ -21,12 +21,6 @@ export async function POST(req: Request) {
 
   try {
     const ctx = await aiContext();
-    const r = await reserve(ctx,
-      sessionId,
-      "muse-voice-transcribe-1.0",
-      "/asr/transcribe",
-      Math.ceil(seconds) * PRICES["muse-voice-transcribe-1.0"].second,
-    );
     const form = new FormData();
     form.append(
       "request",
@@ -45,22 +39,26 @@ export async function POST(req: Request) {
     );
     form.append("audio", new Blob([audio], { type: "audio/wav" }), "chunk.wav");
 
-    try {
-      const res = await metaFetch(`/asr/transcribe?sessionId=${encodeURIComponent(sessionId)}`, {
-        method: "POST",
-        accept: "application/json",
-        body: form,
-      });
-      const data = (await res.json()) as { transcript?: string; audioDurationMs?: number };
-      const billedSeconds = Math.floor((data.audioDurationMs ?? seconds * 1000) / 1000);
-      const entry = await settle(r, billedSeconds * PRICES["muse-voice-transcribe-1.0"].second, true, {
-        audioMs: data.audioDurationMs ?? 0,
-      });
-      return NextResponse.json({ transcript: data.transcript ?? "", latencyMs: entry.latencyMs });
-    } catch (err) {
-      await settle(r, 0, false);
-      throw err;
-    }
+    const { result: data, entry } = await spend(
+      ctx,
+      sessionId,
+      "muse-voice-transcribe-1.0",
+      "/asr/transcribe",
+      Math.ceil(seconds) * PRICES["muse-voice-transcribe-1.0"].second,
+      async () => {
+        const res = await metaFetch(`/asr/transcribe?sessionId=${encodeURIComponent(sessionId)}`, {
+          method: "POST",
+          accept: "application/json",
+          body: form,
+        });
+        return (await res.json()) as { transcript?: string; audioDurationMs?: number };
+      },
+      (data) => ({
+        usd: Math.floor((data.audioDurationMs ?? seconds * 1000) / 1000) * PRICES["muse-voice-transcribe-1.0"].second,
+        detail: { audioMs: data.audioDurationMs ?? 0 },
+      }),
+    );
+    return NextResponse.json({ transcript: data.transcript ?? "", latencyMs: entry.latencyMs });
   } catch (err) {
     return errorResponse(err);
   }

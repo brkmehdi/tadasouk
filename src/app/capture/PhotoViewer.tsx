@@ -1,8 +1,8 @@
 "use client";
 
-// Full-screen preview of a product's photos. Swipe between them; each one gets a quality
-// score (sharpness, light, framing, background) the first time it is shown. From here a photo
-// becomes the main one or is removed.
+// Full-screen preview of a product's photos, best first. Swipe between them; each shows its
+// quality score (sharpness, light, framing, background). From here a photo becomes the main one
+// or is removed.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { displayName, type Product, type ProductImage } from "@/lib/capture/session";
@@ -13,7 +13,6 @@ type Props = {
   onClose: () => void;
   onCover: (imageId: string) => void;
   onRemove: (imageId: string) => void;
-  onScore: (imageId: string) => void;
 };
 
 function sourceLabel(im: ProductImage) {
@@ -23,7 +22,7 @@ function sourceLabel(im: ProductImage) {
   return `Photo du web · ${im.credit ?? "site"}`;
 }
 
-export default function PhotoViewer({ p, start, onClose, onCover, onRemove, onScore }: Props) {
+export default function PhotoViewer({ p, start, onClose, onCover, onRemove }: Props) {
   const stripRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(Math.min(start, p.images.length - 1));
   const at = Math.min(index, p.images.length - 1); // stays valid after a removal
@@ -36,11 +35,6 @@ export default function PhotoViewer({ p, start, onClose, onCover, onRemove, onSc
     // only when the viewer opens
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Score each photo the first time it is on screen.
-  useEffect(() => {
-    if (current && current.quality === undefined && !current.pending) onScore(current.id);
-  }, [current, onScore]);
 
   // The last photo removed: nothing left to show.
   useEffect(() => {
@@ -119,7 +113,8 @@ const VERDICTS = [
 ];
 
 function Quality({ q }: { q: ProductImage["quality"] }) {
-  if (q === undefined || q === "loading") {
+  if (q === undefined) return null;
+  if (q === "loading") {
     return (
       <div className="flex items-center gap-3">
         <span className="ui-skel h-12 w-12 shrink-0 animate-pulse rounded-full" />
@@ -133,6 +128,7 @@ function Quality({ q }: { q: ProductImage["quality"] }) {
   if (q === "error") return <p className="text-sm text-ink-3">La note de qualité n’est pas disponible pour cette photo.</p>;
   const verdict = VERDICTS.find((v) => q.score >= v.min)!;
   const bars: [string, number][] = [
+    ...(q.fidelity != null ? ([["Fidélité", q.fidelity]] as [string, number][]) : []),
     ["Netteté", q.sharpness],
     ["Lumière", q.lighting],
     ["Cadrage", q.framing],

@@ -32,6 +32,9 @@ export default function Accounts({ accounts }: { accounts: Account[] }) {
         <Link href="/admin/videos" className="text-sm font-medium text-brand">
           Vidéos
         </Link>
+        <Link href="/admin/tchentchen" className="text-sm font-medium text-brand">
+          Tchentchen
+        </Link>
       </div>
       <p className="mt-1 text-sm text-ink-3">
         {accounts.length} comptes · {pending} en attente d&apos;activation. Les 10 premiers ont reçu 2 $ d&apos;IA à

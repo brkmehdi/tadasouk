@@ -1,22 +1,54 @@
-import Link from "next/link";
+import type { Metadata } from "next";
+import Landing from "./_landing/Landing";
+
+const SITE = "https://tadasouk.com";
+const TITLE = "Tadasouk · Filmez vos produits, votre boutique se construit";
+const DESCRIPTION =
+  "Filmez vos produits et parlez. Tadasouk découpe chaque produit, écrit sa fiche, compare son prix aux boutiques marocaines et met votre boutique en ligne.";
+
+export const metadata: Metadata = {
+  metadataBase: new URL(SITE),
+  title: { absolute: TITLE },
+  description: DESCRIPTION,
+  alternates: { canonical: "/" },
+  icons: { apple: "/brand/apple-touch-icon.png" },
+  openGraph: {
+    type: "website",
+    url: SITE,
+    siteName: "Tadasouk",
+    locale: "fr_FR",
+    alternateLocale: ["en_US"],
+    title: TITLE,
+    description: DESCRIPTION,
+    images: [{ url: "/brand/og.png", width: 1200, height: 630, alt: "Tadasouk" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: TITLE,
+    description: DESCRIPTION,
+    images: ["/brand/og.png"],
+  },
+};
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Tadasouk",
+  url: SITE,
+  image: `${SITE}/brand/icon-512.png`,
+  description: DESCRIPTION,
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Web, Android, iOS",
+  inLanguage: ["fr", "en", "ar"],
+  areaServed: { "@type": "Country", name: "Morocco" },
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD", description: "Ouverture de la boutique gratuite pendant le lancement" },
+};
 
 export default function Home() {
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-10 bg-white px-6 text-center text-ink">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">SmallStore</h1>
-        <p className="mt-2 text-ink-3">Filmez vos produits et parlez. Votre boutique se construit toute seule.</p>
-        <p className="mt-1 text-ink-3" dir="rtl">
-          صوّر السلعة ديالك و هضر، الحانوت كتبني راسها
-        </p>
-      </div>
-      <Link
-        href="/app"
-        className="flex h-16 w-16 items-center justify-center rounded-full ring-[3px] ring-ink/80"
-        aria-label="Filmer"
-      >
-        <span className="h-[52px] w-[52px] rounded-full bg-red-500" />
-      </Link>
-    </main>
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }} />
+      <Landing />
+    </>
   );
 }

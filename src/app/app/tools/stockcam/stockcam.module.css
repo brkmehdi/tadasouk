@@ -1,0 +1,79 @@
+/* Stock camera: the few moves that say an item was counted. */
+
+/* The "−1" / "+24" chip over the picture: it appears, stays, then lifts away. */
+.pop {
+  animation: pop 1.7s ease-out both;
+}
+@keyframes pop {
+  0% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  12% {
+    transform: none;
+    opacity: 1;
+  }
+  80% {
+    transform: none;
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-16px);
+    opacity: 0;
+  }
+}
+
+@keyframes pop-still {
+  0%,
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* The box around the item found settles on it. */
+.lock {
+  animation: lock 0.25s ease-out both;
+}
+@keyframes lock {
+  from {
+    transform: scale(1.06);
+    opacity: 0;
+  }
+}
+
+/* A new line lands in the list as the flying card reaches it. */
+.arrive {
+  animation: arrive 0.35s 0.5s ease-out both;
+}
+@keyframes arrive {
+  from {
+    opacity: 0;
+    background: rgba(0, 116, 212, 0.08);
+  }
+}
+
+/* The question card slides up. */
+.rise {
+  animation: rise 0.25s ease-out both;
+}
+@keyframes rise {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* no movement, but the chip still goes away */
+  .pop {
+    animation-name: pop-still;
+  }
+  .lock,
+  .arrive,
+  .rise {
+    animation: none;
+  }
+}

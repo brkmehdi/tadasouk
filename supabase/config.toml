@@ -436,8 +436,9 @@ enabled = true
 project_id = "ctxhphcyzkeeivrethbw"
 
 [remotes.production.auth]
-site_url = "https://smallstore.smallstore-app.workers.dev"
-additional_redirect_urls = ["https://smallstore.smallstore-app.workers.dev/**", "http://localhost:3001/**"]
+# tadasouk.com since 2026-11-04; the workers.dev address stays allowed for links already shared.
+site_url = "https://tadasouk.com"
+additional_redirect_urls = ["https://tadasouk.com/**", "https://smallstore.smallstore-app.workers.dev/**", "http://localhost:3001/**"]
 
 # Keep the hosted defaults for everything the local stack loosens.
 [remotes.production.auth.email]
@@ -452,8 +453,20 @@ enroll_enabled = true
 verify_enabled = true
 
 # The send_sms hook sends the codes; no SMS provider in production.
+# Production keeps phone confirmations on (set in the dashboard); declared so a push does not turn them off.
+[remotes.production.auth.sms]
+enable_confirmations = true
+
 [remotes.production.auth.sms.twilio]
 enabled = false
+
+# Google sign-in in production: client from the Google Cloud project "Tadasouk"; its redirect URI
+# is https://ctxhphcyzkeeivrethbw.supabase.co/auth/v1/callback. Id and secret in supabase/.env.
+[remotes.production.auth.external.google]
+enabled = true
+client_id = "env(GOOGLE_CLIENT_ID)"
+secret = "env(GOOGLE_CLIENT_SECRET)"
+skip_nonce_check = false
 
 [remotes.production.db.pooler]
 default_pool_size = 15

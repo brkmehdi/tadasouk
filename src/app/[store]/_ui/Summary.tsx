@@ -37,7 +37,7 @@ export function Lines({ editable = true }: { editable?: boolean }) {
           const v = view(l, i);
           return (
             <li key={l.key} className="flex items-start gap-4">
-              <span className="h-[42px] w-[42px] shrink-0 overflow-hidden rounded bg-[#f2f2f2]">
+              <span className="h-[42px] w-[42px] shrink-0 overflow-hidden rounded bg-[#F3F3F5]">
                 {v.image && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={v.image} alt="" className="h-full w-full object-contain mix-blend-multiply" />

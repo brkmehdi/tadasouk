@@ -4,7 +4,7 @@
 
 import { NextResponse } from "next/server";
 import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
-import { chatCost, PRICES, reserve, settle } from "@/lib/server/usage";
+import { chatCost, PRICES, spend } from "@/lib/server/usage";
 
 export type AgentProduct = {
   id: string;
@@ -33,7 +33,8 @@ const MAX_COMPLETION_TOKENS = 600;
 
 const ref = {
   type: "string",
-  description: "Product id from the session state. Resolve 'this one'/'hada' to the current product, 'the previous one' to the one captured before it, 'the red one' by color or name.",
+  description:
+    "Product id from the session state. Resolve 'this one'/'hada' to the current product, 'the previous one' to the one captured before it, 'the red one' by color or name.",
 };
 
 const fn = (name: string, description: string, properties: Record<string, unknown>, required: string[]) => ({
@@ -65,30 +66,19 @@ const TOOLS = [
     ["product_id", "kind", "value"],
   ),
   fn("rename_product", "Give a product a name.", { product_id: ref, name: { type: "string" } }, ["product_id", "name"]),
-  fn(
-    "set_quantity",
-    "Set how many units are in stock.",
-    { product_id: ref, quantity: { type: "integer" } },
-    ["product_id", "quantity"],
-  ),
+  fn("set_quantity", "Set how many units are in stock.", { product_id: ref, quantity: { type: "integer" } }, ["product_id", "quantity"]),
   fn(
     "set_description",
     "Set the product description the merchant dictates. Keep their words, fix only obvious transcription slips.",
     { product_id: ref, description: { type: "string" } },
     ["product_id", "description"],
   ),
-  fn(
-    "find_better_photos",
-    "The merchant wants nicer photos of a product ('find better images', 'chouf lia tswira mzyana').",
-    { product_id: ref },
-    ["product_id"],
-  ),
-  fn(
-    "check_price",
-    "The merchant asks whether a price is competitive, or what the product sells for elsewhere.",
-    { product_id: ref },
-    ["product_id"],
-  ),
+  fn("find_better_photos", "The merchant wants nicer photos of a product ('find better images', 'chouf lia tswira mzyana').", { product_id: ref }, [
+    "product_id",
+  ]),
+  fn("check_price", "The merchant asks whether a price is competitive, or what the product sells for elsewhere.", { product_id: ref }, [
+    "product_id",
+  ]),
   fn("remove_product", "Remove a product from the store.", { product_id: ref }, ["product_id"]),
   fn(
     "publish_products",
@@ -144,55 +134,62 @@ export async function POST(req: Request) {
 
   try {
     const ctx = await aiContext();
-    const r = await reserve(ctx, sessionId, "muse-spark-1.3", "/chat/completions", estimate);
-    try {
-      const res = await metaFetch("/chat/completions", {
-        method: "POST",
-        accept: "application/json",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "muse-spark-1.3",
-          reasoning_effort: "low",
-          max_completion_tokens: MAX_COMPLETION_TOKENS,
-          tools: TOOLS,
-          tool_choice: "auto",
-          parallel_tool_calls: true,
-          messages: [
-            { role: "system", content: SYSTEM },
-            { role: "user", content: user },
-          ],
-        }),
-      });
-      const data = (await res.json()) as {
-        choices?: {
-          message?: {
-            content?: string | null;
-            tool_calls?: { function: { name: string; arguments: string } }[];
-          };
-        }[];
-        usage?: Parameters<typeof chatCost>[0] & { completion_tokens_details?: { reasoning_tokens?: number } };
-      };
-      const message = data.choices?.[0]?.message;
-      const calls = (message?.tool_calls ?? []).map((c) => {
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(c.function.arguments || "{}");
-        } catch {
-          // A malformed call is dropped; the merchant can repeat the command.
-        }
-        return { name: c.function.name, args };
-      });
-      const entry = await settle(r, chatCost(data.usage), true, {
-        promptTokens: data.usage?.prompt_tokens ?? 0,
-        completionTokens: data.usage?.completion_tokens ?? 0,
-        reasoningTokens: data.usage?.completion_tokens_details?.reasoning_tokens ?? 0,
-        calls: calls.length,
-      });
-      return NextResponse.json({ calls, text: message?.content ?? "", latencyMs: entry.latencyMs });
-    } catch (err) {
-      await settle(r, 0, false);
-      throw err;
-    }
+    type Answer = {
+      choices?: {
+        message?: {
+          content?: string | null;
+          tool_calls?: { function: { name: string; arguments: string } }[];
+        };
+      }[];
+      usage?: Parameters<typeof chatCost>[0] & { completion_tokens_details?: { reasoning_tokens?: number } };
+    };
+    const { result: data, entry } = await spend(
+      ctx,
+      sessionId,
+      "muse-spark-1.3",
+      "/chat/completions",
+      estimate,
+      async () => {
+        const res = await metaFetch("/chat/completions", {
+          method: "POST",
+          accept: "application/json",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "muse-spark-1.3",
+            reasoning_effort: "low",
+            max_completion_tokens: MAX_COMPLETION_TOKENS,
+            tools: TOOLS,
+            tool_choice: "auto",
+            parallel_tool_calls: true,
+            messages: [
+              { role: "system", content: SYSTEM },
+              { role: "user", content: user },
+            ],
+          }),
+        });
+        return (await res.json()) as Answer;
+      },
+      (data) => ({
+        usd: chatCost(data.usage),
+        detail: {
+          promptTokens: data.usage?.prompt_tokens ?? 0,
+          completionTokens: data.usage?.completion_tokens ?? 0,
+          reasoningTokens: data.usage?.completion_tokens_details?.reasoning_tokens ?? 0,
+          calls: data.choices?.[0]?.message?.tool_calls?.length ?? 0,
+        },
+      }),
+    );
+    const message = data.choices?.[0]?.message;
+    const calls = (message?.tool_calls ?? []).map((c) => {
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(c.function.arguments || "{}");
+      } catch {
+        // A malformed call is dropped; the merchant can repeat the command.
+      }
+      return { name: c.function.name, args };
+    });
+    return NextResponse.json({ calls, text: message?.content ?? "", latencyMs: entry.latencyMs });
   } catch (err) {
     return errorResponse(err);
   }

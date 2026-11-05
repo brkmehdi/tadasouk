@@ -43,7 +43,7 @@ export function Dialog({ title, onClose, children, wide }: { title: React.ReactN
     <div className="fixed inset-0 z-[90]" role="dialog" aria-modal="true">
       <div className="ui-scrim" onClick={onClose} />
       <div className={`shop-dialog text-ink ${wide ? "md:w-[560px]" : "md:w-[356px]"}`}>
-        <div className="flex items-center gap-3 border-b border-black/10 px-5 py-4">
+        <div className="flex items-center gap-3 border-b border-line px-5 py-4">
           <div className="min-w-0 flex-1">{title}</div>
           <button type="button" onClick={onClose} aria-label="Fermer" className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-black/5">
             <CloseIcon />
@@ -75,7 +75,7 @@ export function QtyPicker(props: {
         <div className="flex items-center gap-3">
           {props.image && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={props.image} alt="" className="h-8 w-8 rounded bg-[#f2f2f2] object-contain" />
+            <img src={props.image} alt="" className="h-8 w-8 rounded bg-[#F3F3F5] object-contain" />
           )}
           <div className="min-w-0">
             <p className="truncate text-[14px] font-medium">Modifier la quantité</p>

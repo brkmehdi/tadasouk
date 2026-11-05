@@ -112,9 +112,6 @@ Tchentchen account. Tadasouk reaches Stripe only through Tchentchen and never ho
   - Cancelling a paid card order refunds it.
   - The money lands on the Stripe account behind the connected Tchentchen account. SmallStore
     never holds a Stripe key, and Tchentchen's secret key never reaches the browser.
-- **Changes made to Tchentchen during the event:** listed in Tchentchen's `HACKATHON-CHANGES.md`.
-
-  [TO FILL FROM HACKATHON-CHANGES.md]
 
 ### Card payments with your own Tchentchen account
 
@@ -159,9 +156,7 @@ All of these go through `src/lib/server/meta.ts`, which adds the API key on the 
 checks the spending caps (`src/lib/server/usage.ts`) before each call. The key never reaches the
 browser.
 
-## Development tools
-
-[TO FILL: e.g. Muse Code, Claude Code]
+## The one model outside the Meta Model API
 
 All model calls in the product go to Meta models through the Meta Model API. The one model that
 runs outside it is the MediaPipe object detector on the phone (EfficientDet-Lite0, Apache-2.0),

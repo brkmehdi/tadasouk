@@ -122,7 +122,6 @@ Phase 0, live capture spike.
 - README: what was built during the hackathon and what is not built yet, TChenTChen as a
   preexisting component, a table of the Meta models with the file that calls each one, development
   tools, and a hackathon compliance checklist.
-- `docs/DEMO_SCRIPT.md`: the provenance sentence the demo video opens with, and the outline.
 - Checked the full git history: no API key or other secret was ever committed.
 - Product tray: with many products the column now scrolls on iPhone (it used to cut the last
   card and not move). It is only as tall as its cards, fades the edge where more cards are
@@ -221,3 +220,79 @@ Phase 0, live capture spike.
   and returns a box for each; numbered dots on the photo, counts per product and per colour,
   wrong dots removed by a tap, − and +, several shelves added up, stock updated on confirmation.
   Tested on four shop shelves: colours kept apart, products not on the shelf never counted.
+
+## 2026-11-01
+
+Less heat on the phone, cleaner cutouts, lower cost per product, products from videos.
+
+- Filming no longer records a video: the camera screen keeps nothing and uploads nothing.
+  Videos already stored stay in `/admin/videos`.
+- Where the browser can (Android Chrome), each product gets a real photo while the preview runs at
+  540p; elsewhere the preview stays at 720p.
+- The detector runs only on a steady picture, rests between looks, and stops when the browser
+  reports pressure. A ring in the middle shows it: dotted while moving, green and filling when
+  steady.
+- The camera pauses after 60 seconds with no product, no recognised word and no touch.
+- Cutouts: SAM gets the area around the product, enlarged, not the whole frame. The mask keeps the
+  main pieces, fills small holes and gets a smooth edge.
+- Product research is limited to 6 searches ($0.17 down to $0.04 a product).
+- Each product gets one AI photo from another angle; each new request takes the next angle.
+- The studio photo is gone: a product's photos are its real photo, one AI photo and at most 3 photos
+  from shops.
+- All of a product's photos are scored together in one request against the real photo, for quality
+  and for fidelity (is it the exact product), then ranked. A photo that may show another product
+  cannot come first; a main photo the merchant chose stays first. A shop photo that comes first is
+  copied to the store.
+- Shop links now come only from the search results: the model's own links were not real pages.
+- The research sees the product's photo again, and its title replaces ours only when it found that
+  very product: from the name alone it had turned a real car into a toy.
+- A product the image AI refuses (tobacco, for example) says so, and the refused photo costs nothing.
+- Shared catalog (`catalog/README.md`): a barcode read by the camera finds its product in the D1
+  database before any AI is asked, and a product already priced needs no new search. Each product
+  the research finds with certainty joins the catalog.
+- A photographed product is looked for in the shared catalog by name, and only a match the model
+  confirms by comparing photos is used.
+- Every shot is read for a barcode before anything is paid for, zoomed on the product. The same
+  barcode twice is the same product; a known barcode gives the exact name, and the catalog's photo
+  counts as certain.
+- New shooting flow: photos are kept as taken and all shots go to one product until "+". Only then
+  does anything run, from all the photos. Near copies keep the sharper shot, another barcode starts
+  a new product, and the background is removed only if no clean image of the product exists.
+- Naming gives a brand only if it can be read on the product.
+- The catalog keeps the whole research of a barcode, so the next shop gets the same names,
+  description and shop links for free. A reused answer never makes a product poorer.
+- Shop links are opened before they are shown: only a page that names the product is kept.
+- The microphone stays closed while shooting and opens for 12 seconds after "+".
+- Video import: a sales video from the phone becomes products. The file stays on the phone; the AI
+  gets what was said and one picture of 12 frames, and the merchant confirms each product.
+- Stock count: a partial count is flagged, each shelf can use another category, and the + button
+  always moves the count.
+
+## 2026-11-05
+
+- Open source: the license is back to AGPL-3.0 (`LICENSE`, `"license": "AGPL-3.0-only"` in
+  `package.json`), the repository is public and renamed `tadasouk`. Stripe is listed in the README
+  as an existing external payment service, next to Tchentchen.
+
+Card payments through Tchentchen's public API and SDK (Tchentchen existed before the hackathon;
+none of its code is in this repository).
+
+- `src/lib/server/tchentchen.ts` rewritten from Tchentchen's public API reference: payments
+  (create, read, list by order, cancel, refund) with the secret key in `x-api-key`, and events
+  checked with HMAC-SHA256 over the raw body. The guessed checkout API, its webhook secret and
+  its Standard Webhooks check are gone.
+- Checkout: Stripe's card form shows in the page through Tchentchen's SDK (script tag). The
+  server creates a payment for an order id it chooses, the order is placed under that id only if
+  the payment matches its total, then the card is charged. A new total makes a new payment. If
+  the form cannot load, the buyer goes to Tchentchen's pay page.
+- `/api/pay/webhook` records money only after reading the payment back from Tchentchen, once per
+  payment, and keeps the ids of handled events. The thank-you page also reads an unpaid card
+  order's payments and offers "Payer par carte".
+- In-shop QR: the QR is the payment's pay page; its metadata proves the store, so the ticket is
+  gone; Cancel cancels the payment.
+- Cancelling a paid card order refunds it.
+- `/admin/tchentchen`: "Connect Tchentchen" fetches the test and live keys once and stores them
+  encrypted (AES-GCM). `worker.ts` serves the website check file
+  `/.well-known/tchentchen-verification.txt`.
+- Migration `20261104120000_tchentchen_payments.sql`: every payment of an order, refunded amounts,
+  handled events, the encrypted keys.

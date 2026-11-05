@@ -6,10 +6,19 @@ import { formatPrice } from "@/app/capture/ProductCard";
 import { coverOf, type CatalogProduct } from "@/lib/catalog/types";
 import { useT } from "@/lib/i18n";
 import type { AiCredit, Tab } from "./BackOffice";
+import { ToolsGrid } from "./tools/Tools";
+import type { ToolId } from "./tools/types";
 
-type Props = { products: CatalogProduct[]; orders: number; ai: AiCredit; currency: string; onTab: (t: Tab) => void };
+type Props = {
+  products: CatalogProduct[];
+  orders: number;
+  ai: AiCredit;
+  currency: string;
+  onTab: (t: Tab) => void;
+  onTool: (id: ToolId) => void;
+};
 
-export default function HomeTab({ products, orders, ai, currency, onTab }: Props) {
+export default function HomeTab({ products, orders, ai, currency, onTab, onTool }: Props) {
   const { t } = useT();
   const drafts = products.filter((p) => p.status === "draft").length;
   const online = products.filter((p) => p.status === "published").length;
@@ -29,6 +38,8 @@ export default function HomeTab({ products, orders, ai, currency, onTab }: Props
         <Stat label={t("home.online")} value={online} onClick={() => onTab("products")} />
         <Stat label={t("home.sales")} value={orders} onClick={() => onTab("sales")} />
       </section>
+
+      <ToolsGrid onOpen={onTool} />
 
       {latest.length > 0 && (
         <section className="mt-6">

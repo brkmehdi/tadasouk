@@ -29,7 +29,7 @@
   --color-danger: var(--danger);
   --color-navy: var(--navy);
   --color-ok: var(--ok);
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Ubuntu, "Noto Sans Arabic", sans-serif;
+  --font-sans: var(--font-manrope), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Ubuntu, "Noto Sans Arabic", sans-serif;
   --font-mono: var(--font-geist-mono);
 }
 

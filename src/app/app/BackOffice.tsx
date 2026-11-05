@@ -6,7 +6,7 @@
 // already saved as drafts.
 
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import CaptureScreen, { type CaptureApi } from "@/app/capture/CaptureScreen";
 import SellMode from "@/app/capture/SellMode";
 import type { Order } from "@/lib/catalog/orders";
@@ -14,6 +14,7 @@ import { toSessionProduct, type CatalogProduct } from "@/lib/catalog/types";
 import { I18nProvider, useT, type Lang } from "@/lib/i18n";
 import { supabase } from "@/lib/supabase/browser";
 import CountMode from "./CountMode";
+import VideoImport from "./VideoImport";
 import Guide from "./Guide";
 import HomeTab from "./HomeTab";
 import type { PromoCode, ShippingMethod } from "@/lib/catalog/store-settings";
@@ -21,6 +22,8 @@ import ProductsTab from "./ProductsTab";
 import SalesTab from "./SalesTab";
 import { StoreAssistant } from "./StoreAssistant";
 import SettingsTab from "./SettingsTab";
+import { ToolPanel } from "./tools/Tools";
+import type { ToolId } from "./tools/types";
 
 export type Store = {
   id: string;
@@ -35,6 +38,9 @@ export type Store = {
   credit_enabled: boolean;
   tagline: string | null;
   hero_key: string | null;
+  rib: string | null;
+  marketplace_margin: number;
+  marketplaces: Record<string, boolean>;
 };
 
 export type Tab = "home" | "products" | "sales" | "settings";
@@ -49,6 +55,7 @@ type Props = {
   promos: PromoCode[];
   ai: AiCredit;
   lang: Lang;
+  instagram: string | null; // back from Meta's Instagram login: the video import opens again
 };
 
 export default function BackOffice(props: Props) {
@@ -59,14 +66,22 @@ export default function BackOffice(props: Props) {
   );
 }
 
-function Shell({ store, products, orders, shipping, promos, ai }: Props) {
+function Shell({ store, products, orders, shipping, promos, ai, instagram: back }: Props) {
   const { t, lang, setLang } = useT();
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("home");
   const [camera, setCamera] = useState(false);
   const [selling, setSelling] = useState(false);
   const [counting, setCounting] = useState(false);
+  const [importing, setImporting] = useState(!!back);
+  const [tool, setTool] = useState<ToolId | null>(null);
+  const [instagram, setInstagram] = useState(back);
   const captureRef = useRef<CaptureApi>(null);
+
+  // A reload must not open the import again.
+  useEffect(() => {
+    if (back) window.history.replaceState(null, "", "/app");
+  }, [back]);
 
   const openCamera = () => {
     captureRef.current?.start(); // in this tap, before anything else
@@ -121,10 +136,10 @@ function Shell({ store, products, orders, shipping, promos, ai }: Props) {
         {tab === "home" && (
           <>
             <Guide products={products} onRecord={openCamera} />
-            <HomeTab products={products} orders={orders.length} ai={ai} currency={store.currency} onTab={setTab} />
+            <HomeTab products={products} orders={orders.length} ai={ai} currency={store.currency} onTab={setTab} onTool={setTool} />
           </>
         )}
-        {tab === "products" && <ProductsTab store={store} products={products} onCount={() => setCounting(true)} />}
+        {tab === "products" && <ProductsTab store={store} products={products} onCount={() => setCounting(true)} onVideo={() => setImporting(true)} />}
         {tab === "sales" && <SalesTab store={store} orders={orders} products={products} onCounterSale={() => setSelling(true)} />}
         {tab === "settings" && (
           <SettingsTab
@@ -163,7 +178,29 @@ function Shell({ store, products, orders, shipping, promos, ai }: Props) {
         </div>
       </nav>
 
-      {!camera && !selling && !counting && <StoreAssistant />}
+      {!camera && !selling && !counting && !importing && !tool && <StoreAssistant />}
+
+      {tool && (
+        <ToolPanel id={tool} store={store} products={products} orders={orders} onExit={() => setTool(null)} onChanged={() => router.refresh()} />
+      )}
+
+      {importing && (
+        <div className="fixed inset-0 z-50">
+          <VideoImport
+            currency={store.currency}
+            instagram={instagram}
+            onExit={() => {
+              setImporting(false);
+              setInstagram(null);
+            }}
+            onAdd={(items) => {
+              captureRef.current?.importProducts(items);
+              // The products save in the background while their photos and prices arrive.
+              for (const wait of [10_000, 30_000, 60_000]) setTimeout(() => router.refresh(), wait);
+            }}
+          />
+        </div>
+      )}
 
       {counting && (
         <div className="fixed inset-0 z-50">

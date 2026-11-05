@@ -2,11 +2,13 @@
 // signed-in merchant's own store: stores/{store}/{product}/{image}.{ext} for a product photo,
 // stores/{store}/hero/{image}.{ext} for the store's banner (?kind=hero). /media/... serves them;
 // the names are random ids, so a photo is only found through its product or store.
+// With ?from=<address>, the server copies a shop's photo that became a product's main photo.
 
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
 import { NotSignedInError, requireUser } from "@/lib/server/auth";
 import { withDb } from "@/lib/server/db";
+import { fetchWebImage } from "@/lib/server/web-image";
 
 const TYPES: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -19,12 +21,15 @@ export async function POST(req: Request) {
     const hero = url.searchParams.get("kind") === "hero";
     const product = hero ? "hero" : (url.searchParams.get("product") ?? "");
     const image = url.searchParams.get("image") ?? "";
-    const type = (req.headers.get("content-type") ?? "").split(";")[0].trim();
+    const from = url.searchParams.get("from");
+    const copied = from ? await fetchWebImage(from) : null;
+    if (from && !copied) return NextResponse.json({ error: "not_readable" }, { status: 422 });
+    const type = copied?.type ?? (req.headers.get("content-type") ?? "").split(";")[0].trim();
     const ext = TYPES[type];
     if (!(hero || UUID.test(product)) || !UUID.test(image) || !ext) {
       return NextResponse.json({ error: "bad_request" }, { status: 400 });
     }
-    const body = await req.arrayBuffer();
+    const body = copied?.bytes ?? (await req.arrayBuffer());
     if (!body.byteLength || body.byteLength > MAX_BYTES) {
       return NextResponse.json({ error: "too_large" }, { status: 413 });
     }

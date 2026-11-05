@@ -12,9 +12,11 @@ import { currentUser, serverSupabase } from "@/lib/server/auth";
 import BackOffice, { type Store } from "./BackOffice";
 import Onboarding from "./Onboarding";
 
-export const metadata: Metadata = { title: "Ma boutique · SmallStore" };
+export const metadata: Metadata = { title: "Ma boutique · Tadasouk" };
 
-export default async function AppPage() {
+// `?instagram=`: back from Meta's Instagram login (src/app/api/instagram/callback).
+export default async function AppPage({ searchParams }: { searchParams: Promise<{ instagram?: string | string[] }> }) {
+  const back = (await searchParams).instagram;
   const user = await currentUser();
   if (!user) redirect("/connexion");
   const lang = readLang((await cookies()).get(LANG_COOKIE)?.value);
@@ -22,10 +24,12 @@ export default async function AppPage() {
 
   const { data: store } = await db
     .from("stores")
-    .select("id, name, slug, city, whatsapp, currency, published, cod_enabled, card_enabled, credit_enabled, tagline, hero_key")
+    .select("id, name, slug, city, whatsapp, currency, published, cod_enabled, card_enabled, credit_enabled, tagline, hero_key, marketplace_margin, marketplaces")
     .eq("owner_id", user.id)
-    .maybeSingle<Store>();
+    .maybeSingle<Omit<Store, "rib">>();
   if (!store) return <Onboarding userId={user.id} phone={user.phone} />;
+  // The RIB is not readable with the stores (it would be public): only through this function.
+  const { data: rib } = await db.rpc("my_store_rib");
 
   const [{ data: products }, { data: orders }, { data: profile }, { data: wallet }, { data: shipping }, { data: promos }] = await Promise.all([
     db.from("products").select(PRODUCT_COLUMNS).eq("store_id", store.id).neq("status", "archived").order("created_at", { ascending: false }),
@@ -39,13 +43,14 @@ export default async function AppPage() {
 
   return (
     <BackOffice
-      store={store}
+      store={{ ...store, rib: (rib as string | null) ?? null }}
       products={(products ?? []) as CatalogProduct[]}
       orders={(orders ?? []) as Order[]}
       shipping={(shipping ?? []).map((m) => ({ ...m, price: Number(m.price), free_over: m.free_over == null ? null : Number(m.free_over) })) as ShippingMethod[]}
       promos={(promos ?? []).map((c) => ({ ...c, value: Number(c.value), min_subtotal: Number(c.min_subtotal) })) as PromoCode[]}
       ai={ai}
       lang={lang}
+      instagram={typeof back === "string" ? back : null}
     />
   );
 }

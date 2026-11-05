@@ -22,7 +22,9 @@ export async function setOnline(store: Store, ids: string[], online: boolean) {
   if (online && !store.published) await db.from("stores").update({ published: true }).eq("id", store.id);
 }
 
-export default function ProductsTab({ store, products, onCount }: { store: Store; products: CatalogProduct[]; onCount: () => void }) {
+type TabProps = { store: Store; products: CatalogProduct[]; onCount: () => void; onVideo: () => void };
+
+export default function ProductsTab({ store, products, onCount, onVideo }: TabProps) {
   const { t } = useT();
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("all");
@@ -75,6 +77,19 @@ export default function ProductsTab({ store, products, onCount }: { store: Store
           </button>
         ))}
       </div>
+
+      <button type="button" onClick={onVideo} className="ui-card mt-3 flex w-full items-center gap-3 p-4 text-start">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand" aria-hidden>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+            <path d="M10 9.5v5l4.5-2.5z" />
+          </svg>
+        </span>
+        <span>
+          <span className="block text-sm font-medium">{t("video.open")}</span>
+          <span className="block text-xs text-ink-3">{t("video.openHint")}</span>
+        </span>
+      </button>
 
       {products.length > 0 && (
         <button type="button" onClick={onCount} className="ui-card mt-3 flex w-full items-center gap-3 p-4 text-start">

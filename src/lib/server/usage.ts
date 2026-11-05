@@ -160,6 +160,30 @@ export async function settle(
   return entry;
 }
 
+// One paid call: the estimate is reserved first (the caps and the credit are checked there), then
+// the call's real cost is settled, or nothing if the call fails. Settled once only: what the route
+// does with the answer afterwards can fail without touching the bill.
+export async function spend<T>(
+  ctx: AiContext,
+  sessionId: string,
+  model: ModelId,
+  endpoint: string,
+  estimateUsd: number,
+  call: () => Promise<T>,
+  cost: (result: T) => { usd: number; detail?: Record<string, number | string> },
+): Promise<{ result: T; entry: UsageEntry }> {
+  const r = await reserve(ctx, sessionId, model, endpoint, estimateUsd);
+  let result: T;
+  try {
+    result = await call();
+  } catch (err) {
+    await settle(r, 0, false);
+    throw err;
+  }
+  const { usd, detail } = cost(result);
+  return { result, entry: await settle(r, usd, true, detail) };
+}
+
 export async function creditStatus(ctx: AiContext): Promise<Credit> {
   return withDb(async (sql) => {
     const [row] = await sql<StatusRow[]>`select * from public.ai_status(${ctx.userId}::uuid, ${ctx.caps.freeDailyUsd}::numeric)`;

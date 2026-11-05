@@ -5,43 +5,15 @@
 // global_fetch_strictly_public flag, so private addresses are unreachable.
 
 import { NextResponse } from "next/server";
+import { readPage } from "@/lib/server/pages";
 
 type Body = { sessionId: string; urls: string[] };
 type Photo = { image: string; page: string; site: string };
 
-const MAX_PAGES = 5;
-const MAX_BYTES = 200_000;
-const TIMEOUT_MS = 5000;
+const MAX_PAGES = 6; // pages the price research found, so no AI cost; the merchant sees 3 photos at most
 
 // Images that are never the product itself.
 const NOT_PRODUCT = /logo|favicon|sprite|placeholder|banner|default|og-?image|opengraph|share|icon/i;
-
-async function readHead(url: string) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      signal: ctrl.signal,
-      redirect: "follow",
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; SmallStoreBot/0.1)", Accept: "text/html" },
-    });
-    if (!res.ok || !res.body || !(res.headers.get("content-type") ?? "").includes("html")) return null;
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let html = "";
-    while (html.length < MAX_BYTES) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      html += decoder.decode(value, { stream: true });
-    }
-    reader.cancel().catch(() => {});
-    return { html, finalUrl: res.url || url };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 function productImage(html: string, base: string) {
   const candidates: string[] = [];
@@ -96,7 +68,7 @@ export async function POST(req: Request) {
 
   const results = await Promise.all(
     urls.map(async (page): Promise<Photo | null> => {
-      const got = await readHead(page);
+      const got = await readPage(page);
       if (!got) return null;
       const image = productImage(got.html, got.finalUrl);
       return image ? { image, page, site: new URL(got.finalUrl).hostname.replace(/^www\./, "") } : null;

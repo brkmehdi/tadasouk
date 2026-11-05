@@ -9,6 +9,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { NextResponse } from "next/server";
 import { NotSignedInError, requireUser } from "./auth";
 import { DbNotConfiguredError } from "./db";
+import { REFUSED } from "@/lib/capture/refused";
 import { AiCreditError, SpendingCapError, type AiContext, type Caps } from "./usage";
 
 export function serverEnv() {
@@ -58,12 +59,13 @@ export async function metaFetch(path: string, init: RequestInit & { accept?: str
 }
 
 type ResponsesOutput = {
-  output?: { type: string; content?: { type: string; text?: string }[] }[];
+  output?: { type: string; content?: { type: string; text?: string }[]; results?: { url?: string }[] }[];
   usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number } };
 };
 
 // One non-streaming Responses API call whose answer is constrained to `schema`
-// (docs/structured-output). Returns the parsed JSON, token usage and web searches run.
+// (docs/structured-output). Returns the parsed JSON, token usage, web searches run, and the pages
+// those searches returned (with `include: ["web_search_call.results"]`).
 export async function responsesJson<T>(body: Record<string, unknown>, name: string, schema: object) {
   const res = await metaFetch("/responses", {
     method: "POST",
@@ -86,6 +88,7 @@ export async function responsesJson<T>(body: Record<string, unknown>, name: stri
   return {
     parsed,
     searches: data.output?.filter((o) => o.type === "web_search_call").length ?? 0,
+    found: data.output?.flatMap((o) => (o.type === "web_search_call" ? (o.results ?? []).flatMap((r) => (r.url ? [r.url] : [])) : [])) ?? [],
     usage: {
       prompt_tokens: data.usage?.input_tokens,
       completion_tokens: data.usage?.output_tokens,
@@ -93,6 +96,31 @@ export async function responsesJson<T>(body: Record<string, unknown>, name: stri
     },
   };
 }
+
+// An image request can answer 200 and refuse inside the stream, before any image. Reads the
+// first part to know, and gives back the same stream whole.
+export async function watchRefusal(upstream: Response) {
+  const reader = upstream.body!.getReader();
+  const first = await reader.read();
+  const refused = !!first.value && new TextDecoder().decode(first.value).includes(REFUSED);
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (first.value) controller.enqueue(first.value);
+      if (first.done) controller.close();
+    },
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    cancel: () => reader.cancel(),
+  });
+  return { refused, body };
+}
+
+// A photo as the phone sends it to the AI routes: a JPEG data URL, small enough for one request.
+export const isJpegPhoto = (s: unknown, maxLength = 600_000): s is string =>
+  typeof s === "string" && s.startsWith("data:image/jpeg;base64,") && s.length <= maxLength;
 
 // Maps known failures to JSON the capture screen can show in its caption line.
 export function errorResponse(err: unknown) {

@@ -8,6 +8,16 @@ import { loadShipping, loadShop, loadStore } from "@/lib/storefront";
 import { CartProvider } from "./_ui/cart";
 import { CartDrawer } from "./_ui/CartDrawer";
 
+// The Tadasouk logo kit's colours (public/brand/tokens.css), set on the store only: every store reads
+// as part of the Tadasouk family while its own name, photos and products stay in front.
+const KIT = {
+  "--ink": "#16151A",
+  "--ink-2": "rgba(22, 21, 26, 0.72)",
+  "--ink-3": "rgba(22, 21, 26, 0.6)",
+  "--soft": "#F3F3F5",
+  "--line": "#E8E8EC",
+} as React.CSSProperties;
+
 export default async function StoreLayout({ children, params }: { children: React.ReactNode; params: Promise<{ store: string }> }) {
   const found = await loadStore((await params).store);
   if (!found) notFound();
@@ -28,7 +38,7 @@ export default async function StoreLayout({ children, params }: { children: Reac
       products={products}
       shipping={shipping}
     >
-      <div className="min-h-dvh bg-white text-[rgba(26,26,26,0.9)]">
+      <div className="min-h-dvh bg-white text-[#16151A]" style={KIT}>
         {owner && (
           <div className="flex items-center gap-3 bg-ink px-4 py-2 text-xs text-white">
             <span className="flex-1">
@@ -40,8 +50,8 @@ export default async function StoreLayout({ children, params }: { children: Reac
           </div>
         )}
         {children}
+        <CartDrawer />
       </div>
-      <CartDrawer />
     </CartProvider>
   );
 }

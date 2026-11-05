@@ -4,10 +4,10 @@
 
 import { NextResponse } from "next/server";
 import { withDb } from "@/lib/server/db";
-import { aiContext, errorResponse, responsesJson } from "@/lib/server/meta";
-import { chatCost, PRICES, reserve, settle } from "@/lib/server/usage";
+import { aiContext, errorResponse, isJpegPhoto, responsesJson } from "@/lib/server/meta";
+import { chatCost, PRICES, spend } from "@/lib/server/usage";
 
-type Body = { sessionId: string; image: string; label?: string | null; hint?: string | null };
+type Body = { sessionId: string; image: string; more?: string[]; label?: string | null; hint?: string | null };
 
 const SCHEMA = {
   type: "object",
@@ -30,7 +30,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad_json" }, { status: 400 });
   }
   const { sessionId, image, label, hint } = body;
-  if (!sessionId || typeof image !== "string" || !image.startsWith("data:image/jpeg;base64,") || image.length > 600_000) {
+  const more = Array.isArray(body.more) ? body.more : [];
+  if (!sessionId || !isJpegPhoto(image) || more.length > 2 || !more.every((s) => isJpegPhoto(s))) {
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
   }
 
@@ -47,6 +48,9 @@ export async function POST(req: Request) {
       label ? `An on-device detector called it "${label}".` : "",
       hint ? `The merchant said: "${hint}".` : "",
       "Name it as a shop would list it. Read any brand, flavor and size printed on it. Do not invent details you cannot see.",
+      more.length ? `The ${more.length + 1} photos show the same product from different angles: read them all.` : "",
+      "The photos are as taken, with the surroundings: use them to judge its real size. Never call it a toy, a model or a miniature unless the photos clearly show one.",
+      "Name a brand only if you can read it on the product. A partly hidden or unclear brand is left out: a plain name such as bottle of water is better than a wrong brand.",
       known.length
         ? `The shop already uses these categories: ${known.map((k) => `"${k.category}"`).join(", ")}. Use one of them, spelled the same, when it fits; create a new one only if none fits.`
         : "",
@@ -54,34 +58,33 @@ export async function POST(req: Request) {
       .filter(Boolean)
       .join(" ");
     const p = PRICES["muse-spark-1.3"];
-    const r = await reserve(ctx, sessionId, "muse-spark-1.3", "/responses identify", 3000 * p.input + 2500 * p.output);
-    try {
-      const { parsed, usage } = await responsesJson(
-        {
-          model: "muse-spark-1.3",
-          reasoning: { effort: "low" },
-          // Reasoning tokens count toward this limit; too low and the JSON gets cut off.
-          max_output_tokens: 2500,
-          input: [
-            {
-              role: "user",
-              content: [
-                { type: "input_text", text: ask },
-                { type: "input_image", image_url: image },
-              ],
-            },
-          ],
-        },
-        "product_identity",
-        SCHEMA,
-      );
-      const entry = await settle(r, chatCost(usage), true, { inputTokens: usage.prompt_tokens ?? 0 });
-      if (!parsed) return NextResponse.json({ error: "no_result" }, { status: 502 });
-      return NextResponse.json({ result: parsed, latencyMs: entry.latencyMs });
-    } catch (err) {
-      await settle(r, 0, false);
-      throw err;
-    }
+    const { result, entry } = await spend(
+      ctx,
+      sessionId,
+      "muse-spark-1.3",
+      "/responses identify",
+      3000 * p.input + 2500 * p.output,
+      () =>
+        responsesJson(
+          {
+            model: "muse-spark-1.3",
+            reasoning: { effort: "low" },
+            // Reasoning tokens count toward this limit; too low and the JSON gets cut off.
+            max_output_tokens: 2500,
+            input: [
+              {
+                role: "user",
+                content: [{ type: "input_text", text: ask }, ...[image, ...more].map((url) => ({ type: "input_image", image_url: url }))],
+              },
+            ],
+          },
+          "product_identity",
+          SCHEMA,
+        ),
+      ({ usage }) => ({ usd: chatCost(usage), detail: { inputTokens: usage.prompt_tokens ?? 0 } }),
+    );
+    if (!result.parsed) return NextResponse.json({ error: "no_result" }, { status: 502 });
+    return NextResponse.json({ result: result.parsed, latencyMs: entry.latencyMs });
   } catch (err) {
     return errorResponse(err);
   }

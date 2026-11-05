@@ -5,43 +5,63 @@ import { decodeMaskToRaster, parseImageStream, recordsOfKind } from "@meta-sam/p
 import type { Box } from "./detector";
 import { signature, type Signature } from "./similarity";
 
-const MAX_SIDE = 1024;
+const SAM_SIDE = 1024; // the picture SAM gets
+const OUT_SIDE = 1600; // the cutout kept, when the camera gave more pixels than SAM needs
+const MAX_ENLARGE = 2; // SAM's mask is coarser than its picture, so a small product goes in enlarged
+const MARGIN = 0.18; // room kept around the product's box
 
 // `point` (a tap) marks the product inside `box`; `box` also frames the instant crop.
-export type Keyframe = { canvas: HTMLCanvasElement; box: Box; point?: { x: number; y: number }; at: number };
+// `still`: a real photo taken at the same moment, when the phone can take one.
+export type Keyframe = {
+  canvas: HTMLCanvasElement;
+  box: Box;
+  point?: { x: number; y: number };
+  at: number;
+  still?: Promise<HTMLCanvasElement | null> | null;
+};
 
-// Copies the current video frame (downscaled) and maps the detector box onto it.
+// Copies the current video frame at full size; coordinates are video pixels.
 export function grabKeyframe(video: HTMLVideoElement, box: Box, point?: { x: number; y: number }): Keyframe {
-  const scale = Math.min(1, MAX_SIDE / Math.max(video.videoWidth, video.videoHeight));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(video.videoWidth * scale);
-  canvas.height = Math.round(video.videoHeight * scale);
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
   canvas.getContext("2d")!.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return { canvas, box, point, at: performance.now() };
+}
+
+// What SAM looks at: only the area around the product when its box is known, so the product
+// fills the picture and the mask, and `full`, the same area with all the pixels we have.
+function viewOf(k: Keyframe, still: HTMLCanvasElement | null, box: Box | null) {
+  const src = still ?? k.canvas;
+  const r = src.width / k.canvas.width;
+  const W = k.canvas.width;
+  const H = k.canvas.height;
+  const x = box ? Math.max(0, box.x - box.w * MARGIN) : 0;
+  const y = box ? Math.max(0, box.y - box.h * MARGIN) : 0;
+  const w = box ? Math.min(W, box.x + box.w * (1 + MARGIN)) - x : W;
+  const h = box ? Math.min(H, box.y + box.h * (1 + MARGIN)) - y : H;
+  const side = Math.max(w, h);
+  const s = Math.min(SAM_SIDE / side, MAX_ENLARGE * r);
+  const o = Math.max(s, Math.min(r, OUT_SIDE / side));
+  const drawn = (scale: number) => {
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(w * scale));
+    c.height = Math.max(1, Math.round(h * scale));
+    const ctx = c.getContext("2d")!;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(src, x * r, y * r, w * r, h * r, 0, 0, c.width, c.height);
+    return c;
+  };
+  const picture = drawn(s);
   return {
-    canvas,
-    box: { x: box.x * scale, y: box.y * scale, w: box.w * scale, h: box.h * scale },
-    point: point && { x: point.x * scale, y: point.y * scale },
-    at: performance.now(),
+    picture,
+    full: o > s ? drawn(o) : picture,
+    at: (px: number, py: number) => ({ x: (px - x) * s, y: (py - y) * s }),
   };
 }
 
-// Padded crop shown on the card the instant the capture fires, before SAM answers.
-export function ghostCrop(k: Keyframe): string {
-  const pad = 0.08;
-  const x = Math.max(0, k.box.x - k.box.w * pad);
-  const y = Math.max(0, k.box.y - k.box.h * pad);
-  const w = Math.min(k.canvas.width - x, k.box.w * (1 + 2 * pad));
-  const h = Math.min(k.canvas.height - y, k.box.h * (1 + 2 * pad));
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.round(w));
-  c.height = Math.max(1, Math.round(h));
-  c.getContext("2d")!.drawImage(k.canvas, x, y, w, h, 0, 0, c.width, c.height);
-  return c.toDataURL("image/jpeg", 0.7);
-}
-
-// `url`: the product on white with a soft shadow (what the shop shows by default).
-// `cutoutUrl`: the transparent cutout itself, kept for studio photos.
-export type Cutout = { url: string; cutoutUrl: string; color: string | null; samMs: number; sig: Signature };
+// `url`: the product on white with a soft shadow.
+export type Cutout = { url: string; color: string | null; samMs: number; sig: Signature };
 
 export class SegmentError extends Error {
   constructor(
@@ -130,20 +150,31 @@ export async function locateProduct(
 
 export async function segment(sessionId: string, k: Keyframe): Promise<Cutout | null> {
   const started = performance.now();
-  const located = k.point ? await locateProduct(sessionId, k.canvas, k.point) : null;
-  // Located: one box around the whole product. Not located: several guesses around the tap.
+  const [located, still] = await Promise.all([
+    k.point ? locateProduct(sessionId, k.canvas, k.point) : null,
+    k.still ?? null,
+  ]);
+  // Located: one box around the whole product. Not located: several guesses around the tap,
+  // on the whole picture.
   const box = located ?? k.box;
-  const candidates = k.point && !located ? tapCandidates(k) : undefined;
+  const tap = k.point && !located ? tapCandidates(k) : undefined;
+  const view = viewOf(k, still, tap ? null : box);
+  const corners = (b: Rect) => {
+    const a = view.at(b.left, b.top);
+    const z = view.at(b.right, b.bottom);
+    return { left: a.x, top: a.y, right: z.x, bottom: z.y };
+  };
+  const candidates = tap?.map((c) => c && corners(c));
   const res = await fetch("/api/segment", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       sessionId,
-      image: k.canvas.toDataURL("image/jpeg", 0.85),
-      width: k.canvas.width,
-      height: k.canvas.height,
-      box: { left: box.x, top: box.y, right: box.x + box.w, bottom: box.y + box.h },
-      point: k.point,
+      image: view.picture.toDataURL("image/jpeg", 0.9),
+      width: view.picture.width,
+      height: view.picture.height,
+      box: corners({ left: box.x, top: box.y, right: box.x + box.w, bottom: box.y + box.h }),
+      point: k.point && view.at(k.point.x, k.point.y),
       candidates,
     }),
   });
@@ -157,7 +188,7 @@ export async function segment(sessionId: string, k: Keyframe): Promise<Cutout | 
   const mask = candidates ? pickTapMask(masks) : masks[0];
   if (!mask) return null;
   if (!candidates) {
-    return composite(k, decodeMaskToRaster(mask.mask), mask.mask.width, mask.mask.height, mask.bounds, samMs);
+    return composite(view, decodeMaskToRaster(mask.mask), mask.mask.width, mask.mask.height, mask.bounds, samMs);
   }
   // In one request SAM gives each pixel to a single object, so the smaller guesses (the label
   // under the finger) are cut out of the chosen one. Put back every mask lying inside it.
@@ -182,7 +213,7 @@ export async function segment(sessionId: string, k: Keyframe): Promise<Cutout | 
       }
     }
   }
-  return composite(k, merged, bw, bh, b, samMs);
+  return composite(view, merged, bw, bh, b, samMs);
 }
 
 export async function* sseEvents(body: ReadableStream<Uint8Array>) {
@@ -205,50 +236,131 @@ export async function* sseEvents(body: ReadableStream<Uint8Array>) {
   }
 }
 
+// SAM's mask is on or off and coarser than the photo: alone it gives stairs on the edges, specks
+// around the product and small holes in it. This keeps the product's main pieces, fills small
+// holes (a large one may be a real opening, like a handle) and gives the edge a clean soft line.
+function eachPiece(m: Uint8Array, w: number, h: number, value: number, visit: (cells: number[], edge: boolean) => void) {
+  const seen = new Uint8Array(w * h);
+  for (let i = 0; i < m.length; i++) {
+    if (seen[i] || m[i] !== value) continue;
+    const cells = [i];
+    seen[i] = 1;
+    let edge = false;
+    const add = (q: number) => {
+      if (!seen[q] && m[q] === value) {
+        seen[q] = 1;
+        cells.push(q);
+      }
+    };
+    for (let c = 0; c < cells.length; c++) {
+      const p = cells[c];
+      const x = p % w;
+      const y = (p - x) / w;
+      if (x === 0 || y === 0 || x === w - 1 || y === h - 1) edge = true;
+      if (x > 0) add(p - 1);
+      if (x < w - 1) add(p + 1);
+      if (y > 0) add(p - w);
+      if (y < h - 1) add(p + w);
+    }
+    visit(cells, edge);
+  }
+}
+
+function cleanMask(raster: Uint8Array, w: number, h: number) {
+  const pieces: number[][] = [];
+  eachPiece(raster, w, h, 1, (cells) => pieces.push(cells));
+  const largest = Math.max(0, ...pieces.map((p) => p.length));
+  const out = new Uint8Array(w * h);
+  for (const piece of pieces) {
+    if (piece.length < largest * 0.15) continue;
+    for (const i of piece) out[i] = 1;
+  }
+  eachPiece(out, w, h, 0, (cells, edge) => {
+    if (edge || cells.length > largest * 0.015) return;
+    for (const i of cells) out[i] = 1;
+  });
+  return out;
+}
+
+function softAlpha(mask: Uint8Array, rw: number, rh: number, bw: number, bh: number) {
+  const a = new Float32Array(bw * bh);
+  for (let y = 0; y < bh; y++) {
+    const fy = Math.max(0, Math.min(rh - 1, ((y + 0.5) * rh) / bh - 0.5));
+    const y0 = Math.floor(fy);
+    const y1 = Math.min(rh - 1, y0 + 1);
+    const ty = fy - y0;
+    for (let x = 0; x < bw; x++) {
+      const fx = Math.max(0, Math.min(rw - 1, ((x + 0.5) * rw) / bw - 0.5));
+      const x0 = Math.floor(fx);
+      const x1 = Math.min(rw - 1, x0 + 1);
+      const tx = fx - x0;
+      const top = mask[y0 * rw + x0] * (1 - tx) + mask[y0 * rw + x1] * tx;
+      const low = mask[y1 * rw + x0] * (1 - tx) + mask[y1 * rw + x1] * tx;
+      a[y * bw + x] = top * (1 - ty) + low * ty;
+    }
+  }
+  const radius = Math.max(1, Math.round(Math.max(bw, bh) / 400));
+  const blurLine = (start: number, step: number, n: number, line: Float32Array) => {
+    let sum = 0;
+    for (let i = 0; i < n; i++) line[i] = a[start + i * step];
+    for (let i = -radius; i <= radius; i++) sum += line[Math.max(0, Math.min(n - 1, i))];
+    for (let i = 0; i < n; i++) {
+      a[start + i * step] = sum / (2 * radius + 1);
+      sum += line[Math.min(n - 1, i + radius + 1)] - line[Math.max(0, i - radius)];
+    }
+  };
+  const row = new Float32Array(bw);
+  const col = new Float32Array(bh);
+  for (let y = 0; y < bh; y++) blurLine(y * bw, 1, bw, row);
+  for (let x = 0; x < bw; x++) blurLine(x, bw, bh, col);
+  // Past the middle of the blur, so the line sits just inside the product and leaves no halo.
+  for (let i = 0; i < a.length; i++) a[i] = Math.max(0, Math.min(1, (a[i] - 0.55) * 3 + 0.5));
+  return a;
+}
+
 async function composite(
-  k: Keyframe,
+  view: { picture: HTMLCanvasElement; full: HTMLCanvasElement },
   raster: Uint8Array,
   rw: number,
   rh: number,
   bounds: { left: number; top: number; right: number; bottom: number },
   samMs: number,
 ): Promise<Cutout> {
-  const bw = Math.max(1, bounds.right - bounds.left);
-  const bh = Math.max(1, bounds.bottom - bounds.top);
+  const f = view.full.width / view.picture.width;
+  const left = Math.round(bounds.left * f);
+  const top = Math.round(bounds.top * f);
+  const bw = Math.max(1, Math.round((bounds.right - bounds.left) * f));
+  const bh = Math.max(1, Math.round((bounds.bottom - bounds.top) * f));
   const out = document.createElement("canvas");
   out.width = bw;
   out.height = bh;
   const ctx = out.getContext("2d")!;
-  ctx.drawImage(k.canvas, bounds.left, bounds.top, bw, bh, 0, 0, bw, bh);
+  ctx.drawImage(view.full, left, top, bw, bh, 0, 0, bw, bh);
   const img = ctx.getImageData(0, 0, bw, bh);
   const px = img.data;
+  const alpha = softAlpha(cleanMask(raster, rw, rh), rw, rh, bw, bh);
   let r = 0,
     g = 0,
     b = 0,
     n = 0;
   for (let y = 0; y < bh; y++) {
-    const ry = Math.min(rh - 1, Math.floor((y * rh) / bh));
     for (let x = 0; x < bw; x++) {
-      const rx = Math.min(rw - 1, Math.floor((x * rw) / bw));
-      const i = (y * bw + x) * 4;
-      if (raster[ry * rw + rx]) {
-        if ((x + y) % 3 === 0) {
-          r += px[i];
-          g += px[i + 1];
-          b += px[i + 2];
-          n++;
-        }
-      } else {
-        px[i + 3] = 0;
+      const k = y * bw + x;
+      const i = k * 4;
+      if (alpha[k] > 0.9 && (x + y) % 3 === 0) {
+        r += px[i];
+        g += px[i + 1];
+        b += px[i + 2];
+        n++;
       }
+      px[i + 3] = alpha[k] * 255;
     }
   }
   ctx.putImageData(img, 0, 0);
   const sig = signature(out, { x: 0, y: 0, w: bw, h: bh }, true);
-  const [png, white] = await Promise.all([toBlob(out, "image/png"), toBlob(onWhite(out), "image/jpeg", 0.9)]);
+  const white = await toBlob(onWhite(out), "image/jpeg", 0.9);
   return {
     url: URL.createObjectURL(white),
-    cutoutUrl: URL.createObjectURL(png),
     color: n ? colorName(r / n, g / n, b / n) : null,
     samMs,
     sig,
@@ -289,6 +401,7 @@ export function onWhite(cut: HTMLCanvasElement | HTMLImageElement, side = 1024) 
   ctx.fillStyle = g;
   ctx.fillRect(side / 2 - w * 0.6, sy - w * 0.6, w * 1.2, w * 1.2);
   ctx.restore();
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(cut, x, y, w, h);
   return c;
 }

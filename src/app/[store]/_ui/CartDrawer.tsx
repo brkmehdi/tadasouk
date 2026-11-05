@@ -38,8 +38,8 @@ export function CartDrawer() {
     <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="Votre panier">
       <div className="ui-scrim" onClick={closeDrawer} />
       <aside className="shop-drawer text-ink">
-        <div className="flex items-center gap-2 border-b border-black/10 px-4 py-3.5">
-          <span className="text-[16px] font-medium">Votre panier</span>
+        <div className="flex items-center gap-2 border-b border-line px-4 py-3.5">
+          <span className="text-[16px] font-bold tracking-[-0.01em]">Votre panier</span>
           {count > 0 && <span className="text-[14px] text-ink-3">{count} article{count > 1 ? "s" : ""}</span>}
           <button type="button" onClick={closeDrawer} aria-label="Fermer le panier" className="ms-auto flex h-8 w-8 items-center justify-center rounded-full hover:bg-black/5">
             <CloseIcon />
@@ -48,7 +48,7 @@ export function CartDrawer() {
 
         {count === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
-            <p className="text-[16px] font-medium">Votre panier est vide</p>
+            <p className="text-[16px] font-bold">Votre panier est vide</p>
             <p className="text-[14px] text-ink-3">Les meilleures ventes sont un bon point de départ.</p>
             <Link href={`/${store.slug}/boutique`} onClick={closeDrawer} className="ui-btn ui-btn-primary mt-3 h-11 px-6">
               Voir les produits
@@ -66,7 +66,7 @@ export function CartDrawer() {
               </div>
               <Upsell title="Ajoutez à votre commande" items={offers} />
             </div>
-            <div className="border-t border-black/10 px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <div className="border-t border-line px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <PayButton
                 state={going ? "busy" : blocked ? "idle" : "ready"}
                 label="Commander"

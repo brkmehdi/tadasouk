@@ -12,10 +12,25 @@
 		"binding": "ASSETS"
 	},
 	"observability": { "enabled": true },
+	// tadasouk.com (bought 2026-11-04 at Cloudflare Registrar, zone in this account). The old
+	// workers.dev address keeps working: links already shared and the Meta app still point to it.
+	"routes": [
+		{ "pattern": "tadasouk.com", "custom_domain": true },
+		{ "pattern": "www.tadasouk.com", "custom_domain": true }
+	],
+	"workers_dev": true,
 	// Supabase Postgres (project SmallStore, Frankfurt) through the pooler, as the role
 	// smallstore_worker; caching off. In `npm run dev` the same binding points at the local stack.
 	// Product photos (cutouts, studio and AI photos), written by /api/media, served by /media/...
 	"r2_buckets": [{ "binding": "MEDIA", "bucket_name": "smallstore-media" }],
+	// The shared catalog of products, by barcode (src/lib/server/catalog.ts).
+	"d1_databases": [
+		{
+			"binding": "CATALOG",
+			"database_name": "smallstore-catalog",
+			"database_id": "7adf6cd2-74b2-48f5-a9cb-923882c85e8c"
+		}
+	],
 	"hyperdrive": [
 		{
 			"binding": "HYPERDRIVE",
@@ -26,8 +41,19 @@
 	"vars": {
 		"MODEL_API_BASE": "https://api.meta.ai/v1",
 		"R2_BUCKET_NAME": "smallstore-media",
+		// Meta app SmallStore and its Instagram login configuration (Facebook Login for Business).
+		"META_APP_ID": "1124556357223880",
+		"META_LOGIN_CONFIG_ID": "1149407898017146",
 		// Hard spending caps in US dollars, checked before every Meta Model API call.
 		"AI_FREE_DAILY_USD": "0",
-		"DAILY_CAP_USD": "10.00"
+		"DAILY_CAP_USD": "10.00",
+		// The site's address. Card payments only work on it: it is the website verified in Tchentchen.
+		"SITE_URL": "https://tadasouk.com",
+		// Tchentchen card payments (src/lib/server/tchentchen.ts): test mode until the owner says
+		// live (https://app.tchentchen.com/api/v1/live). The keys are secrets, never here.
+		"TCHENTCHEN_API_BASE": "https://app.tchentchen.com/api/v1/sandbox",
+		// Tchentchen's website check token for tadasouk.com, public by design: worker.ts serves it at
+		// /.well-known/tchentchen-verification.txt. Someone running their own copy puts theirs here.
+		"TCHENTCHEN_VERIFY_TOKEN": "tchentchen-site-bd617c014cdb55013acd65b8d4150379d1d6ff69"
 	}
 }

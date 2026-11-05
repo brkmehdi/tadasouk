@@ -10,6 +10,10 @@
 
 export type Signature = { color: Float32Array; hash: Uint8Array };
 
+// Above this, a capture shows a product already taken (the camera, and a video's scan).
+export const SAME_CROP = 0.74;
+export const SAME_SHOT = 0.93; // two shots of one product this alike show the same angle
+
 const SIZE = 32;
 const HUE_BINS = 16;
 let scratch: HTMLCanvasElement | null = null;

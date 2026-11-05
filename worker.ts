@@ -8,7 +8,21 @@ import { serveVideo } from "./src/lib/server/video";
 
 export default {
   fetch(req, env, ctx) {
-    if (req.method === "GET" && new URL(req.url).pathname.startsWith("/media/captures/")) {
+    const url = new URL(req.url);
+    // Tchentchen's website check: the token as plain text, on both addresses, never redirected.
+    if (url.pathname === "/.well-known/tchentchen-verification.txt" && (req.method === "GET" || req.method === "HEAD")) {
+      const token = env.TCHENTCHEN_VERIFY_TOKEN?.trim();
+      if (!token) return new Response("Not found", { status: 404 });
+      return new Response(req.method === "HEAD" ? null : token, {
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+      });
+    }
+    // One address for links and search engines: www.tadasouk.com goes to tadasouk.com.
+    if (url.hostname === "www.tadasouk.com") {
+      url.hostname = "tadasouk.com";
+      return Response.redirect(url.toString(), 301);
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/media/captures/")) {
       return serveVideo(req, env.MEDIA, env.MEDIA_LINK_SECRET);
     }
     return nextApp.fetch(req, env, ctx);

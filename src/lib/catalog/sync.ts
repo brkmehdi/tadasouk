@@ -9,13 +9,13 @@
 import type { Product, ProductImage } from "@/lib/capture/session";
 import { supabase } from "@/lib/supabase/browser";
 
-// Web photos belong to other shops' pages: they help the merchant, they are not published.
-const keepsPhoto = (img: ProductImage) => !img.pending && img.source !== "web" && !!img.url;
+// Photos from shops help the merchant choose; only one that became the main photo is published.
+const keepsPhoto = (img: ProductImage, at: number) => !img.pending && (img.source !== "web" || at === 0) && !!img.url;
 
 // A product is worth saving once it has a real photo, or a name given by voice.
 const worthSaving = (p: Product) => p.status === "removing" || p.images.some(keepsPhoto) || !!p.name;
 
-type Saved = { row: string; photos: Map<string, number> }; // photo id -> position saved
+type Saved = { row: string; photos: Map<string, number>; scored: Set<string> }; // photo id -> position saved
 
 export function createCatalogSync(storeId: string, onError: (message: string) => void) {
   const saved = new Map<string, Saved>();
@@ -41,6 +41,14 @@ export function createCatalogSync(storeId: string, onError: (message: string) =>
   });
 
   async function upload(p: Product, img: ProductImage) {
+    if (img.source === "web") {
+      const q = new URLSearchParams({ product: p.id, image: img.id, from: img.url });
+      const res = await fetch(`/api/media?${q}`, { method: "POST" });
+      // The shop refused it: the next photo becomes the store's main photo.
+      if (res.status === 422) return null;
+      if (!res.ok) throw new Error(`photo copy ${res.status}`);
+      return ((await res.json()) as { key: string }).key;
+    }
     const blob = await (await fetch(img.url)).blob();
     const type = blob.type && blob.type !== "application/octet-stream" ? blob.type : "image/jpeg";
     const res = await fetch(`/api/media?product=${p.id}&image=${img.id}`, {
@@ -59,7 +67,7 @@ export function createCatalogSync(storeId: string, onError: (message: string) =>
       saved.delete(p.id);
       return;
     }
-    const s = saved.get(p.id) ?? { row: "", photos: new Map() };
+    const s: Saved = saved.get(p.id) ?? { row: "", photos: new Map(), scored: new Set() };
     const r = row(p);
     const sig = JSON.stringify(r);
     if (s.row !== sig) {
@@ -77,9 +85,11 @@ export function createCatalogSync(storeId: string, onError: (message: string) =>
     const photos = p.images.filter(keepsPhoto);
     for (const [position, img] of photos.entries()) {
       const at = s.photos.get(img.id);
-      if (at === position) continue;
+      const quality = typeof img.quality === "object" ? img.quality : null;
+      if (at === position && (!quality || s.scored.has(img.id))) continue;
       if (at === undefined) {
         const key = await upload(p, img);
+        if (!key) continue;
         const { error } = await db.from("product_images").upsert({
           id: img.id,
           product_id: p.id,
@@ -89,15 +99,16 @@ export function createCatalogSync(storeId: string, onError: (message: string) =>
           label: null,
           credit: img.credit ?? null,
           position,
-          quality: typeof img.quality === "object" ? img.quality : null,
+          quality,
         });
         if (error) throw new Error(error.message);
       } else {
-        // The cover changed: positions move.
-        const { error } = await db.from("product_images").update({ position }).eq("id", img.id);
+        // The cover changed or the photos were ranked: positions move.
+        const { error } = await db.from("product_images").update({ position, quality }).eq("id", img.id);
         if (error) throw new Error(error.message);
       }
       s.photos.set(img.id, position);
+      if (quality) s.scored.add(img.id);
     }
     const kept = new Set(photos.map((i) => i.id));
     const gone = [...s.photos.keys()].filter((id) => !kept.has(id));

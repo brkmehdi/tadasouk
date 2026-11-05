@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { adminUser, listAccounts } from "@/lib/server/admin";
 import Accounts from "./Accounts";
 
-export const metadata: Metadata = { title: "Admin · SmallStore", robots: { index: false } };
+export const metadata: Metadata = { title: "Admin · Tadasouk", robots: { index: false } };
 
 export default async function AdminPage() {
   if (!(await adminUser())) notFound();

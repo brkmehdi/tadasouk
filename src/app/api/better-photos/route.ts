@@ -4,7 +4,7 @@
 // for several angles in parallel. The Worker streams the result straight through.
 
 import { NextResponse } from "next/server";
-import { aiContext, errorResponse, metaFetch } from "@/lib/server/meta";
+import { aiContext, errorResponse, metaFetch, watchRefusal } from "@/lib/server/meta";
 import { PRICES, reserve, settle } from "@/lib/server/usage";
 
 type Body = {
@@ -71,9 +71,13 @@ export async function POST(req: Request) {
       await settle(r, 0, false);
       throw err;
     }
-    // Billed per image actually returned; settled at the requested count (upper bound).
-    await settle(r, cost, true, { images: 1, angle });
-    return new Response(upstream.body, {
+    // Billed per image actually returned: a refused one costs nothing.
+    const { refused, body: stream } = await watchRefusal(upstream).catch(async (err: unknown) => {
+      await settle(r, 0, false);
+      throw err;
+    });
+    await settle(r, refused ? 0 : cost, true, { images: refused ? 0 : 1, angle });
+    return new Response(stream, {
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
     });
   } catch (err) {

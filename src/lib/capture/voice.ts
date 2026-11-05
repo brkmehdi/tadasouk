@@ -18,9 +18,18 @@ export type VoiceEvents = {
 
 const WORKLET = `
 class Tap extends AudioWorkletProcessor {
+  buf = new Float32Array(2048); // about 40 ms, so the page wakes 25 times a second, not 375
+  n = 0;
   process(inputs) {
     const ch = inputs[0] && inputs[0][0];
-    if (ch) this.port.postMessage(ch.slice(0));
+    if (ch) {
+      if (this.n + ch.length > this.buf.length) {
+        this.port.postMessage(this.buf.slice(0, this.n));
+        this.n = 0;
+      }
+      this.buf.set(ch, this.n);
+      this.n += ch.length;
+    }
     return true;
   }
 }
@@ -132,8 +141,8 @@ export async function startVoice(ctx: AudioContext, stream: MediaStream, ev: Voi
   };
 }
 
-function toWav(frames: Float32Array[]) {
-  const samples = frames.length * FRAME;
+export function toWav(frames: Float32Array[]) {
+  const samples = frames.reduce((n, f) => n + f.length, 0);
   const buf = new ArrayBuffer(44 + samples * 2);
   const v = new DataView(buf);
   const str = (o: number, s: string) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));

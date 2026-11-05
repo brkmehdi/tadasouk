@@ -101,19 +101,12 @@ src/lib/capture/ session.ts, detector.ts, cutout.ts, similarity.ts, voice.ts, ba
 
 ### Deployment (read before running any deploy command)
 
-- An earlier build of this app is already live as the Worker **`smallstore`** at
-  `https://smallstore.smallstore-app.workers.dev`. **Never deploy under that name**: it would
-  replace the working app.
-- Name this Worker **`smallstore-muse`** in `wrangler.jsonc`. It will be served at
-  `https://smallstore-muse.smallstore-app.workers.dev`.
-- Cloudflare account: "Meta Hackaton", `account_id: "d57fb66226e5bda27248ba2c4d62077a"`
-  (set it in `wrangler.jsonc`; the login on this machine has several accounts and a deploy
-  without it fails). The workers.dev subdomain `smallstore-app` already exists: do not change
-  it.
+- Deploy to your own Cloudflare account under a Worker name of your choice (set `name` and,
+  if your login has several accounts, `account_id` in `wrangler.jsonc`).
 - Set the secret for this Worker before testing: `npx wrangler secret put MODEL_API_KEY`
-  (secrets belong to each Worker; the live app's secret does not carry over).
+  (secrets belong to each Worker).
 - Do not create custom domains, routes, DNS records or new subdomains, and do not delete or
-  modify other Workers on the account. Ask the owner before any deploy.
+  modify other Workers on the account.
 
 ## 4. Meta Model API: the exact calls
 
