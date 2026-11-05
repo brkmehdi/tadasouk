@@ -22,6 +22,10 @@ async function cardState(orderId: string, paymentStatus: string, cancelled: bool
   if (!cfg) return null; // card payment is not set up: no payment block, no button that cannot work
   try {
     return await withDb(async (sql) => {
+      // Paid in Tchentchen's checkout (checkout mode): its order hook marks it paid; until then the
+      // payment is being confirmed, and no second payment is offered.
+      const [checkout] = await sql`select 1 from public.tchentchen_checkouts where order_id = ${orderId}::uuid`;
+      if (checkout) return "processing";
       const payments = await settleOrder(sql, cfg, orderId);
       const [r] = await sql<{ payment_status: string }[]>`select payment_status from public.orders where id = ${orderId}::uuid`;
       if (r?.payment_status === "paid") return "paid";

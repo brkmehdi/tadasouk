@@ -46,9 +46,14 @@
 		"DAILY_CAP_USD": "10.00",
 		// Your site's address. Card payments only work on it: it is the website verified in Tchentchen.
 		"SITE_URL": "https://example.com",
-		// Tchentchen card payments: sandbox for tests, https://app.tchentchen.com/api/v1/live for real
-		// payments. The keys are secrets (wrangler secret put), never here.
+		// Tchentchen payments, sandbox by default (test cards, nothing charged). For real payments:
+		// https://app.tchentchen.com/api/v1/live, with your live key. The keys are secrets (the
+		// Connect page in /admin/tchentchen, or wrangler secret put), never here.
 		"TCHENTCHEN_API_BASE": "https://app.tchentchen.com/api/v1/sandbox",
+		// "on" (the default): a store that takes cards gets Tchentchen's checkout as its payment page
+		// (card, and cash on delivery when it is on for your website in Tchentchen). "off": the card
+		// is a row of the store's own checkout (payment mode).
+		"TCHENTCHEN_CHECKOUT_MODE": "on",
 		// The website check token Tchentchen gives you; worker.ts serves it at
 		// /.well-known/tchentchen-verification.txt.
 		"TCHENTCHEN_VERIFY_TOKEN": "<your Tchentchen website token>"

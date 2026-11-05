@@ -22,6 +22,7 @@ import ProductsTab from "./ProductsTab";
 import SalesTab from "./SalesTab";
 import { StoreAssistant } from "./StoreAssistant";
 import SettingsTab from "./SettingsTab";
+import SignOutButton from "../SignOutButton";
 import { ToolPanel } from "./tools/Tools";
 import type { ToolId } from "./tools/types";
 
@@ -130,6 +131,7 @@ function Shell({ store, products, orders, shipping, promos, ai, instagram: back 
             </button>
           ))}
         </div>
+        <SignOutButton icon label={t("settings.signOut")} className="flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-soft hover:text-ink" />
       </header>
 
       <div className="px-5">
@@ -147,8 +149,10 @@ function Shell({ store, products, orders, shipping, promos, ai, instagram: back 
             shipping={shipping}
             promos={promos}
             onSignOut={async () => {
-              await supabase().auth.signOut();
+              // Same route as the header button: this browser only, cookies cleared by the server.
+              await fetch("/api/auth/signout", { method: "POST" }).catch(() => null);
               router.replace("/connexion");
+              router.refresh();
             }}
           />
         )}

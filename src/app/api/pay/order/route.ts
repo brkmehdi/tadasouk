@@ -63,6 +63,9 @@ export async function POST(req: Request) {
       if (!o) return { status: 404, body: { error: "not_found" } };
       if (o.payment_method !== "card" || o.status === "cancelled") return { status: 409, body: { error: "not_payable" } };
       if (o.payment_status !== "unpaid") return { status: 200, body: { paid: true } };
+      // An order from Tchentchen's checkout (checkout mode) is paid there, never a second time here.
+      const [fromCheckout] = await sql`select 1 from public.tchentchen_checkouts where order_id = ${o.id}::uuid`;
+      if (fromCheckout) return { status: 200, body: { processing: true } };
 
       const payments = await settleOrder(sql, cfg, o.id);
       o = (await read())!;

@@ -1,7 +1,7 @@
 # Changelog
 
 Everything in this repository was written during the Meta Global AI Developer Hackathon
-(indie track, deadline 2026-11-04 21:00 ET).
+(indie track, deadline 2026-11-04 21:00 ET), except the last section, "After the deadline".
 
 ## 2026-10-27
 
@@ -296,3 +296,31 @@ none of its code is in this repository).
   `/.well-known/tchentchen-verification.txt`.
 - Migration `20261104120000_tchentchen_payments.sql`: every payment of an order, refunded amounts,
   handled events, the encrypted keys.
+
+## After the deadline
+
+Written on 2026-11-05, after the hackathon's deadline, once Tchentchen released its API for
+custom sites (release 2: checkout mode and cash on delivery).
+
+- Tchentchen's checkout is the default payment page of a store that takes cards
+  (`TCHENTCHEN_CHECKOUT_MODE`, `on` unless set to `off`; sandbox by default in
+  `wrangler.example.jsonc`). The page is blank and holds only Tchentchen's checkout, over the
+  whole window on a phone, a tablet or a laptop, so its layout matches Tchentchen's own page.
+- The cart, priced by our database with its delivery and promotion code, becomes a Tchentchen
+  checkout (`/api/pay/checkout`). Tchentchen's signed order hook (`/api/pay/order-hook`) makes
+  one order per checkout (paid, awaiting, cash on delivery) and brings it in step on later calls:
+  awaiting then paid is marked paid; awaiting then failed is cancelled, its stock and promotion
+  code use given back.
+- A paid checkout always gets its order: when the store would refuse it (an item sold out or
+  taken off sale meanwhile, a payment or delivery method turned off), the order is made at the
+  price paid and its note tells the seller to ship, restock or refund. A total that differs from
+  ours is written on the order too.
+- Cancelling a paid checkout order refunds it through Tchentchen. A payment that goes through
+  after the seller cancelled the order is refunded by itself.
+- Migration `20261105120000_tchentchen_checkout.sql`: one row per checkout (the order id chosen in
+  advance, the store, the promotion code and the delivery the cart was priced with).
+- Checked against Tchentchen's public docs: refund keys within 80 characters, no terms box with
+  sample terms, a line without our reference handled.
+- "Se déconnecter" in the back office header, in Réglages, on /admin, and on the sign-in page,
+  which no longer sends a signed-in visitor back to the back office and shows the Google logo on
+  "Continuer avec Google". Sign out refuses posts from other sites.

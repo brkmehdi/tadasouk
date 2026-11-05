@@ -31,3 +31,6 @@ TCHENTCHEN_SECRET_KEY=
 # Encrypts the keys the Connect page saves in the database (AES-GCM). Any long random string,
 # e.g. `openssl rand -hex 32`. In production: `npx wrangler secret put TCHENTCHEN_KEYS_SECRET`.
 TCHENTCHEN_KEYS_SECRET=
+# Tchentchen's checkout is the payment page by default (checkout mode); "off" keeps the store's own
+# checkout with a card row (payment mode). A wrangler.jsonc var: set here only to override it locally.
+# TCHENTCHEN_CHECKOUT_MODE=off

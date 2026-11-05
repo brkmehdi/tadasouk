@@ -26,7 +26,21 @@ type MountOptions = {
   onChange?: (state: { complete: boolean; method: string | null }) => void;
   onUnavailable?: (info: { payUrl: string; reason: string }) => void;
 };
-type Factory = (options?: { locale?: string }) => { payment: { mount(target: HTMLElement, options: MountOptions): Promise<CardHandle> } };
+export type CheckoutOptions = {
+  checkoutUrl: string;
+  mount?: string | HTMLElement;
+  onEvent?: (name: string, data: Record<string, unknown>) => void;
+  onComplete?: (info: { redirectUrl: string }) => void;
+  onClose?: (info: { cancelUrl: string | null }) => void;
+  onRenew?: () => Promise<string | null>;
+};
+type Factory = (options?: { locale?: string }) => {
+  payment: { mount(target: HTMLElement, options: MountOptions): Promise<CardHandle> };
+  checkout: {
+    open(options: CheckoutOptions): { close(): void };
+    resume(options: Omit<CheckoutOptions, "checkoutUrl">): { close(): void } | null;
+  };
+};
 
 declare global {
   interface Window {
@@ -34,7 +48,7 @@ declare global {
   }
 }
 
-function loadSdk(src: string) {
+export function loadSdk(src: string) {
   return new Promise<Factory>((resolve, reject) => {
     if (window.TchenTchen) return resolve(window.TchenTchen);
     let s = document.querySelector<HTMLScriptElement>("script[data-tchentchen-sdk]");
